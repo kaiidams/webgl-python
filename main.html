@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width">
+        <title>PyWebGL Test</title>
+    </head>
+    <body>
+        <canvas id="canvas" width="640" height="480"></canvas>
+        <script src="main.js"></script>
+        <script>
+"use strict";
+
+window.addEventListener("load", () => {
+    class CanvasObject {
+        constructor(elem) {
+            this.elem = elem;
+        }
+
+        getContext(contextId) {
+            return elem.getContext(contextId);
+        }
+    }
+
+    const elem = document.getElementById("canvas");
+    const name = "browser";
+    const uri = `ws://${window.location.host}/ws`;
+    const transport = new TransportWebSocket(uri);
+    const server = new Server(name, transport);
+    server.registerDefaultMethods();
+    server.registerRootObject(new CanvasObject(elem));
+    server.serve();
+});
+        </script>
+    </body>
+</html>
