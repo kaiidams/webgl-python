@@ -54,6 +54,36 @@ class Server {
         this.nextObjectId = 0;
         this.liveObjects = {};
         this.global = { window: window };
+        this.methods = {
+            "__getter__": (params) => {
+                let target = params[0] == null ? this.global : params[0];
+                let name = params[1];
+                return target[name];
+            },
+            "__new__": (params) => {
+                const name = params.shift();
+                const constructor = window[name].bind(null, ...params);
+                return new constructor();
+            },
+            "__inspect__": (params) => {
+                let methods = [];
+                let properties = [];
+                const prototype = window[params[0]].prototype;
+                const parent = Object.getPrototypeOf(prototype).constructor.name
+                for (const key in prototype) {
+                    if (prototype.hasOwnProperty(key)) {
+                        console.log(key);
+                        const desc = Object.getOwnPropertyDescriptor(prototype, key);
+                        if (desc.value instanceof Function) {
+                            methods.push(key);
+                        } else {
+                            properties.push(key);
+                        }
+                    }
+                }
+                return {parent: parent, methods: methods, properties: properties};
+            }
+        };
     }
 
     serve() {
@@ -63,10 +93,8 @@ class Server {
     onReceive(data) {
         const params = this.unmarshalParams(data.params);
         let result;
-        if (data.method === "__getter__") {
-            let target = params[0] == null ? this.global : params[0];
-            let name = params[1];
-            result = target[name];
+        if (this.methods.hasOwnProperty(data.method)) {
+            result = this.methods[data.method](params);
         } else {
             const target = params.shift();
             result = target[data.method].apply(target, params);
@@ -80,7 +108,9 @@ class Server {
 
     unmarshalParams(params) {
         return params.map((value) => {
-            if (value !== null && typeof(value) === "object") {
+            if (value instanceof Array) {
+                return value;
+            } else if (value !== null && typeof(value) === "object") {
                 return this.liveObjects[value.id];
             } else {
                 return value;
@@ -95,14 +125,20 @@ class Server {
         if (typeof(result) !== "object") {
             return result;
         }
+        if (Object.getPrototypeOf(result) === Object.prototype) {
+            return result;
+        }
+        if (Object.getPrototypeOf(result) === Array.prototype) {
+            return result;
+        }
         if (result._objectId === undefined) {
             const objectId = this.nextObjectId++;
             this.liveObjects[objectId] = result;
             result._objectId = objectId;
         }
+        const constructor = Object.getPrototypeOf(result).constructor.name;
         return {
-            id: result._objectId,
-            class: Object.getPrototypeOf(result).constructor.name
+            __jsonclass__: [constructor, result._objectId]
         };
     }
 }
