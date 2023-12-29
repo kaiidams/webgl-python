@@ -1,4 +1,6 @@
-class TransportWebsocket {
+"use strict";
+
+class TransportWebSocket {
     constructor(addr) {
         this.addr = addr;
         this.ws = null;
@@ -11,20 +13,31 @@ class TransportWebsocket {
         this.ws = new WebSocket(this.addr);
 
         this.ws.onopen = async (event) => {
-            let e = await sendRequest(null, "register", [node]);
-            console.log(e);
+            this.send({
+                destination: null,
+                method: "__register__",
+                params: [server.name]
+            });
         };
         
         this.ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             console.log('<--', data);
             if (data.result !== undefined) {
-                const proxy = this.serverProxies[data.sender];
-                proxy.onReceived(data);
+                const proxy = this.serverProxies[data.source];
+                proxy.onReceive(data);
             } else {
                 this.server.onReceive(data);
             }
         };
+
+        this.ws.onclose = (event) => {
+            console.log(event);
+        }
+
+        this.ws.onerror = (event) => {
+            console.log(event);
+        }
     }
 
     send(data) {
@@ -40,14 +53,14 @@ class Server {
         this.transport = transport;
         this.nextObjectId = 0;
         this.liveObjects = {};
-        this.global = {};
+        this.global = { window: window };
     }
 
     serve() {
         this.transport.start(this);
     }
 
-    onReceived(data) {
+    onReceive(data) {
         const params = this.unmarshalParams(data.params);
         let result;
         if (data.method === "__getter__") {
@@ -56,18 +69,18 @@ class Server {
             result = target[name];
         } else {
             const target = params.shift();
-            result = target[data.name].apply(target, params);
+            result = target[data.method].apply(target, params);
         }
         this.transport.send({
             id: data.id,
-            receiver: data.sender,
-            result: marshalResult(result)
+            destination: data.source,
+            result: this.marshalResult(result)
         });
     }
 
     unmarshalParams(params) {
         return params.map((value) => {
-            if (typeof(value) === "object") {
+            if (value !== null && typeof(value) === "object") {
                 return this.liveObjects[value.id];
             } else {
                 return value;
@@ -76,102 +89,109 @@ class Server {
     }
 
     marshalResult(result) {
+        if (result === undefined || result == null) {
+            return null;
+        }
         if (typeof(result) !== "object") {
             return result;
         }
         if (result._objectId === undefined) {
             const objectId = this.nextObjectId++;
             this.liveObjects[objectId] = result;
-            result._objectId = target;
+            result._objectId = objectId;
         }
         return {
-            id: result._objectId
+            id: result._objectId,
+            class: Object.getPrototypeOf(result).constructor.name
         };
     }
 }
 
 class ServerProxy {
-    constructor(ws, name) {
-        this.ws = ws;
+    constructor(name, transport) {
+        this.transport = transport;
         this.name = name;
         this.nextRequestId = 0;
         this.liveObjects = {};
         this.pendingRequests = {};
+        this.transport.serverProxies[this.name] = this;
     }
 
-    sendRequest(receiver, method, params) {
+    request(method, params) {
         const requestId = this.nextRequestId++;
-        data = {
+        this.transport.send({
             id: requestId,
-            receiver: receiver,
+            destination: this.name,
             method: method,
             params: this.marshalParams(params),
-        };
-        this.transport.send(data);
+        });
         return new Promise(resolve => {
             this.pendingRequests[requestId] = resolve;
         });
     }
 
-    onReceived(data) {
+    onReceive(data) {
         let resolve = this.pendingRequests[data.id];
         delete this.pendingRequests[data.id];
         resolve(this.unmarshalResult(data.result));
     }
 
     unmarshalResult(result) {
-        if (typeof(result) === 'object') {
-            return new ProxyObject(this, result.id);
+        if (result !== null && typeof(result) === 'object') {
+            return new ObjectProxy(this, result.id);
         }
         return result;
     }
 
     marshalParams(params) {
         return params.map((value) => {
-            if (typeof(value) === 'object') {
-                return { id: value.id };
+            if (value instanceof ObjectProxy) {
+                return { id: value.objectId };
             }
             return value;
         });
     }
 }
 
-class ProxyObject
-{
-    constructor(server, objectId) {
-        this.server = server;
+class ObjectProxy {
+    constructor(proxy, objectId) {
+        this.proxy = proxy;
         this.objectId = objectId;
     }
 
-    async getProperty(propertyName) {
-        let result = await sendRequest(this.node, this.target, "get", propertyName, []);
-        return unmarshalObject(result.value);
-    }
-
-    async invokeMethod(methodName, params) {
-        let unmarshaledparams = marshalArray(params);
-        let result = await sendRequest(this.node, this.target, "invoke", methodName, unmarshaledparams);
-        return unmarshalObject(result.value);
+    async invoke(method, ...args) {
+        args.unshift(this.objectId === null ? null : this);
+        return await this.proxy.request(method, args);
     }
 }
 
 window.addEventListener("load", async () => {
     console.log(window.location.search);
     const name = window.location.search.replace('?name=', '');
-    const addr = "ws://192.168.10.109:8000/ws";
-    const transport = new TransportWebsocket(addr);
-    const server = new Server(ws, name);
+    const remote = name == 'server_a' ? 'server_b' : 'server_a';
+    const addr = `ws://${window.location.host}/ws`;
+    const transport = new TransportWebSocket(addr);
+    const server = new Server(name, transport);
+    const proxy1 = new ServerProxy(remote, transport);
+    const proxy2 = new ServerProxy('server_c', transport);
     server.serve();
 
-    const startElement = document.getElementById("start");
-    startElement.addEventListener("click", async (event) => {
+    const test1Elem = document.getElementById("test1");
+    test1Elem.addEventListener("click", async (event) => {
         event.preventDefault();
-        let g = new ProxyObject(node == 'a' ? 'b' : 'a', null);
-        let win = await g.getProperty("window");
-        let doc = await win.getProperty("document");
-        let body = await doc.getProperty("body");
+        let g = new ObjectProxy(proxy1, null);
+        let win = await g.invoke("__getter__", "window");
+        let doc = await win.invoke("__getter__", "document");
+        let body = await doc.invoke("__getter__", "body");
         //let res = await win.invokeMethod("alert", ["Hi!"]);
-        let x = await body.getProperty("innerHTML");
+        let x = await body.invoke("__getter__", "innerHTML");
         console.log(x);
+    });
+
+    const test2Elem = document.getElementById("test2");
+    test2Elem.addEventListener("click", async (event) => {
+        event.preventDefault();
+        let g = new ObjectProxy(proxy2, null);
+        await g.invoke("start");
     });
 });
