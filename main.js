@@ -21,13 +21,17 @@ class TransportWebSocket {
         };
         
         this.ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            console.log('<--', data);
-            if (data.result !== undefined) {
-                const proxy = this.serverProxies[data.source];
-                proxy.onReceive(data);
-            } else {
-                this.server.onReceive(data);
+            try {
+                const data = JSON.parse(event.data);
+                console.log('<--', data);
+                if (data.result !== undefined) {
+                    const proxy = this.serverProxies[data.source];
+                    proxy.onReceive(data);
+                } else {
+                    this.server.onReceive(data);
+                }
+            } catch (ex) {
+                console.error(ex);
             }
         };
 
@@ -42,7 +46,7 @@ class TransportWebSocket {
 
     send(data) {
         console.log('-->', data);
-        data.dynbus = "0.1";
+        data.jsonrpc = "pywebgl-0.1";
         this.ws.send(JSON.stringify(data));
     }
 }
@@ -91,19 +95,31 @@ class Server {
     }
 
     onReceive(data) {
-        const params = this.unmarshalParams(data.params);
-        let result;
-        if (this.methods.hasOwnProperty(data.method)) {
-            result = this.methods[data.method](params);
-        } else {
-            const target = params.shift();
-            result = target[data.method].apply(target, params);
+        try {
+            const params = this.unmarshalParams(data.params);
+            let result;
+            if (this.methods.hasOwnProperty(data.method)) {
+                result = this.methods[data.method](params);
+            } else {
+                const target = params.shift();
+                result = target[data.method].apply(target, params);
+            }
+            this.transport.send({
+                id: data.id,
+                destination: data.source,
+                result: this.marshalResult(result)
+            });
+        } catch (ex) {
+            console.error(ex);
+            this.transport.send({
+                id: data.id,
+                destination: data.source,
+                error: {
+                    code: -32603,
+                    message: ex.message
+                }
+            });
         }
-        this.transport.send({
-            id: data.id,
-            destination: data.source,
-            result: this.marshalResult(result)
-        });
     }
 
     unmarshalParams(params) {

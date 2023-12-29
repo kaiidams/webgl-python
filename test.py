@@ -8,6 +8,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+class ProxyException(Exception):
+    pass
+
+
 class TransportWebsocket:
     def __init__(self, uri):
         self.uri = uri
@@ -39,10 +43,12 @@ class TransportWebsocket:
             data = self.ws.recv()
             data = json.loads(data)
             logger.info('<-- %s', data)
-            if "result" in data:
-                if not source:
+            assert data["jsonrpc"] == "pywebgl-0.1"
+            if "error" in data:
+                if source and data["source"] == source and data["id"] == request_id:
                     return data
-                if data["source"] == source and data["id"] == request_id:
+            elif "result" in data:
+                if source and data["source"] == source and data["id"] == request_id:
                     return data
                 proxy = self.serverProxies[data["source"]]
                 proxy.onReceive(data)
@@ -51,7 +57,7 @@ class TransportWebsocket:
 
     def send(self, data):
         logger.info('--> %s', data)
-        data["dynbus"] = "0.1"
+        data["jsonrpc"] = "pywebgl-0.1"
         self.ws.send(json.dumps(data))
 
 class Server:
@@ -128,6 +134,9 @@ class ServerProxy:
             "params": self.marshalParams(params),
         })
         data = self.transport.wait_until(self.name, request_id)
+        if "error" in data:
+            error = data["error"]
+            raise ProxyException(error["code"], error["message"])
         return self.unmarshalResult(data["result"])
 
     def onReceive(self, data):
