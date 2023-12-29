@@ -1,125 +1,169 @@
-var ws = new WebSocket("ws://localhost:8000/ws");
-
-var node = null;
-var oid = 0;
-var tid = 0;
-var liveObjects = {};
-var pendingMessages = {};
-
-function sendMessage(receiver_node, target, type, name, args) {
-    var transaction = `tid-${tid++}`;
-    ws.send(JSON.stringify({
-        transaction: transaction,
-        receiver: receiver_node,
-        target: target,
-        type: type,
-        name: name,
-        args: args,
-    }));
-    return new Promise(resolve => {
-        pendingMessages[transaction] = resolve;
-    });
-}
-
-function unmarshal(value) {
-    if (typeof(value) === 'object') {
-        return new ProxyObject(value.node, value.target);
+class TransportWebsocket {
+    constructor(addr) {
+        this.addr = addr;
+        this.ws = null;
+        this.server = null;
+        this.serverProxies = {};
     }
-    return value;
+
+    start(server) {
+        this.server = server;
+        this.ws = new WebSocket(this.addr);
+
+        this.ws.onopen = async (event) => {
+            let e = await sendRequest(null, "register", [node]);
+            console.log(e);
+        };
+        
+        this.ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            console.log('<--', data);
+            if (data.result !== undefined) {
+                const proxy = this.serverProxies[data.sender];
+                proxy.onReceived(data);
+            } else {
+                this.server.onReceive(data);
+            }
+        };
+    }
+
+    send(data) {
+        console.log('-->', data);
+        data.dynbus = "0.1";
+        this.ws.send(JSON.stringify(data));
+    }
 }
 
-function marshal(args) {
-    return args.map((value) => {
-        if (typeof(value) === "object") {
-            if (value._target !== undefined) {
-                return {
-                    node: node,
-                    target: value._target
-                };
-            }
-            let target = `oid-${oid++}`;
-            liveObjects[target] = value;
-            value._target = target;
-            return {
-                node: node,
-                target: target
-            };
+class Server {
+    constructor(name, transport) {
+        this.name = name;
+        this.transport = transport;
+        this.nextObjectId = 0;
+        this.liveObjects = {};
+        this.global = {};
+    }
+
+    serve() {
+        this.transport.start(this);
+    }
+
+    onReceived(data) {
+        const params = this.unmarshalParams(data.params);
+        let result;
+        if (data.method === "__getter__") {
+            let target = params[0] == null ? this.global : params[0];
+            let name = params[1];
+            result = target[name];
+        } else {
+            const target = params.shift();
+            result = target[data.name].apply(target, params);
         }
-        return value; 
-    })
+        this.transport.send({
+            id: data.id,
+            receiver: data.sender,
+            result: marshalResult(result)
+        });
+    }
+
+    unmarshalParams(params) {
+        return params.map((value) => {
+            if (typeof(value) === "object") {
+                return this.liveObjects[value.id];
+            } else {
+                return value;
+            }
+        });
+    }
+
+    marshalResult(result) {
+        if (typeof(result) !== "object") {
+            return result;
+        }
+        if (result._objectId === undefined) {
+            const objectId = this.nextObjectId++;
+            this.liveObjects[objectId] = result;
+            result._objectId = target;
+        }
+        return {
+            id: result._objectId
+        };
+    }
+}
+
+class ServerProxy {
+    constructor(ws, name) {
+        this.ws = ws;
+        this.name = name;
+        this.nextRequestId = 0;
+        this.liveObjects = {};
+        this.pendingRequests = {};
+    }
+
+    sendRequest(receiver, method, params) {
+        const requestId = this.nextRequestId++;
+        data = {
+            id: requestId,
+            receiver: receiver,
+            method: method,
+            params: this.marshalParams(params),
+        };
+        this.transport.send(data);
+        return new Promise(resolve => {
+            this.pendingRequests[requestId] = resolve;
+        });
+    }
+
+    onReceived(data) {
+        let resolve = this.pendingRequests[data.id];
+        delete this.pendingRequests[data.id];
+        resolve(this.unmarshalResult(data.result));
+    }
+
+    unmarshalResult(result) {
+        if (typeof(result) === 'object') {
+            return new ProxyObject(this, result.id);
+        }
+        return result;
+    }
+
+    marshalParams(params) {
+        return params.map((value) => {
+            if (typeof(value) === 'object') {
+                return { id: value.id };
+            }
+            return value;
+        });
+    }
 }
 
 class ProxyObject
 {
-    constructor(node, target) {
-        this.node = node;
-        this.target = target;
+    constructor(server, objectId) {
+        this.server = server;
+        this.objectId = objectId;
     }
 
     async getProperty(propertyName) {
-        let result = await sendMessage(this.node, this.target, "get", propertyName, []);
-        return unmarshal(result.value);
+        let result = await sendRequest(this.node, this.target, "get", propertyName, []);
+        return unmarshalObject(result.value);
     }
 
-    async invokeMethod(methodName, args) {
-        let unmarshaledArgs = marshal(args);
-        let result = await sendMessage(this.node, this.target, "invoke", methodName, unmarshaledArgs);
-        return unmarshal(result.value);
+    async invokeMethod(methodName, params) {
+        let unmarshaledparams = marshalArray(params);
+        let result = await sendRequest(this.node, this.target, "invoke", methodName, unmarshaledparams);
+        return unmarshalObject(result.value);
     }
 }
 
-ws.onopen = async function(event) {
-    node = window.location.search.replace('?node=', '');
-    let e = await sendMessage(null, null, "register", node, []);
-    console.log(e);
-};
-
-ws.onmessage = function(event) {
-    var messages = document.getElementById('messages')
-    var message = document.createElement('pre')
-    var content = document.createTextNode(event.data)
-    message.appendChild(content)
-    messages.appendChild(message)
-    let data = JSON.parse(event.data);
-    if (data.type === "return") {
-        console.log(data);
-        let resolve = pendingMessages[data.transaction];
-        delete pendingMessages[data.transaction];
-        resolve(data);    
-    } else {
-        if (data.type === "get") {
-            let target;
-            if (data.target == null) {
-                target = window;
-            } else {
-                target = liveObjects[data.target];
-            }
-            let args = [ target[data.name] ];
-            let marshaledArgs = marshal(args);
-            ws.send(JSON.stringify({
-                transaction: data.transaction,
-                receiver: data.sender,
-                type: "return",
-                value: marshaledArgs[0]
-            }));
-        } else if (data.type === "invoke") {
-            target = liveObjects[data.target];
-            let res = target[data.name].apply(target, data.args);
-            ws.send(JSON.stringify({
-                transaction: data.transaction,
-                receiver: data.sender,
-                type: "return",
-                value: res
-            }));
-        }
-    }
-};
-
 window.addEventListener("load", async () => {
-    var startElement = document.getElementById("start");
     console.log(window.location.search);
-    node = window.location.search.replace('?node=', '')
+    const name = window.location.search.replace('?name=', '');
+    const addr = "ws://192.168.10.109:8000/ws";
+    const transport = new TransportWebsocket(addr);
+    const server = new Server(ws, name);
+    server.serve();
 
+    const startElement = document.getElementById("start");
     startElement.addEventListener("click", async (event) => {
         event.preventDefault();
         let g = new ProxyObject(node == 'a' ? 'b' : 'a', null);
@@ -130,11 +174,4 @@ window.addEventListener("load", async () => {
         let x = await body.getProperty("innerHTML");
         console.log(x);
     });
-
-    // ws.send(JSON.stringify({
-    //     "type": "get",
-    //     "device": null,
-    //     "target": null,
-    //     "name": "window"
-    // }));
 });

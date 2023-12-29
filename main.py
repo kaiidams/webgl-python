@@ -1,5 +1,6 @@
 from typing import Mapping, Any
 import uuid
+from pathlib import Path
 from fastapi import FastAPI, WebSocket
 from fastapi.responses import HTMLResponse
 
@@ -14,8 +15,16 @@ async def root():
     return HTMLResponse(html)
 
 
+@app.get("/test")
+async def test():
+    with open('test.html') as fp:
+        html = fp.read()
+    return HTMLResponse(html)
+
+
 @app.get("/main.js")
 async def script():
+    __file__
     with open('main.js') as fp:
         js = fp.read()
     return HTMLResponse(js, media_type="text/javascript")
@@ -48,7 +57,7 @@ async def websocket_endpoint(websocket: WebSocket):
             sender_node = data['name']
             nodes[sender_node] = websocket
             await websocket.send_json({
-                "transaction": data['transaction'],
+                "id": data['id'],
                 "receiver": sender_node,
                 "type": "return",
             })
