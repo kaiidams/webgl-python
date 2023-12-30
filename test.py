@@ -34,7 +34,7 @@ class TransportWebsocket:
                 "method": "__register__",
                 "params": [server.name]
             })
-        
+
             while True:
                 self.wait_until(None, None)
 
@@ -59,6 +59,7 @@ class TransportWebsocket:
         logger.info('--> %s', data)
         data["jsonrpc"] = "pywebgl-0.1"
         self.ws.send(json.dumps(data))
+
 
 class Server:
     def __init__(self, name, transport):
@@ -114,6 +115,7 @@ class Server:
             "class": "object",
         }
 
+
 class ServerProxy:
     def __init__(self, name, transport):
         self.transport = transport
@@ -161,7 +163,7 @@ class ServerProxy:
     def marshalParams(self, params):
         def f(value):
             if isinstance(value, ObjectProxy):
-                return { "id": value.object_id }
+                return {"id": value.object_id}
             return value
         return [f(value) for value in params]
 
@@ -170,6 +172,8 @@ class ServerProxy:
             if constructor in self.constructors:
                 break
             spec = self.invoke("__inspect__", constructor)
+            if spec is None:
+                break
             self.constructors[constructor] = spec
             constructor = spec["parent"]
 
@@ -187,7 +191,7 @@ class ObjectProxy:
 
     def __getattr__(self, name):
         constructor = self.constructor
-        while True:
+        while constructor:
             spec = self.proxy.constructors[constructor]
             print(spec)
             if name in spec["properties"]:
@@ -195,7 +199,6 @@ class ObjectProxy:
             if name in spec["methods"]:
                 return partial(self.invoke, name)
             constructor = spec["parent"]
-        return self.invoke("__getter__", name)
 
     def __str__(self):
         return f"<ObjectProxy object; proxy={self.proxy.name}, constructor={self.constructor}, object_id={self.object_id}>"
@@ -216,6 +219,7 @@ void main() {
     gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
 }
 """
+
 
 #
 # Initialize a shader program, so WebGL knows how to draw our data
@@ -299,10 +303,10 @@ def initPositionBuffer(gl, proxy):
 
 
 def drawScene(gl, programInfo, buffers, proxy):
-    gl.clearColor(0.0, 0.0, 0.0, 1.0) # Clear to black, fully opaque
-    gl.clearDepth(1.0) # Clear everything
-    gl.enable(gl.DEPTH_TEST) # Enable depth testing
-    gl.depthFunc(gl.LEQUAL) # Near things obscure far things
+    gl.clearColor(0.0, 0.0, 0.0, 1.0)  # Clear to black, fully opaque
+    gl.clearDepth(1.0)  # Clear everything
+    gl.enable(gl.DEPTH_TEST)  # Enable depth testing
+    gl.depthFunc(gl.LEQUAL)  # Near things obscure far things
 
     # Clear the canvas before we start drawing on it.
 
@@ -315,7 +319,7 @@ def drawScene(gl, programInfo, buffers, proxy):
     # and we only want to see objects between 0.1 units
     # and 100 units away from the camera.
 
-    fieldOfView = (45 * math.pi) / 180 # in radians
+    fieldOfView = (45 * math.pi) / 180  # in radians
     aspect = gl.canvas.clientWidth / gl.canvas.clientHeight
     zNear = 0.1
     zFar = 100.0
@@ -334,23 +338,23 @@ def drawScene(gl, programInfo, buffers, proxy):
         # Now move the drawing position a bit to where we want to
         # start drawing the square.
         mat4.translate(
-            modelViewMatrix, # destination matrix
-            modelViewMatrix, # matrix to translate
+            modelViewMatrix,  # destination matrix
+            modelViewMatrix,  # matrix to translate
             [-0.0, 0.0, -6.0],
-        ) # amount to translate
+        )  # amount to translate
     else:
         projectionMatrix = proxy.invoke("__new__", "Float32Array", [
-                1.8106601238250732, 0, 0, 0,
-                0, 2.4142136573791504, 0, 0,
-                0, 0, -1.0020020008087158, -1,
-                0, 0, -0.20020020008087158, 0, 
-            ])
+            1.8106601238250732, 0, 0, 0,
+            0, 2.4142136573791504, 0, 0,
+            0, 0, -1.0020020008087158, -1,
+            0, 0, -0.20020020008087158, 0,
+        ])
         modelViewMatrix = proxy.invoke("__new__", "Float32Array", [
-                1, 0, 0, 0,
-                0, 1, 0, 0,
-                0, 0, 1, 0,
-                0, 0, -6, 1,
-            ])
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, -6, 1,
+        ])
 
     # Tell WebGL how to pull out the positions from the position
     # buffer into the vertexPosition attribute.
@@ -399,9 +403,10 @@ def setPositionAttribute(gl, buffers, programInfo):
 
 def test(proxy, document):
     print(document)
-    elem = document.getElementById("canvas")
+    elem = document.getElementById("glcanvas")
     if elem is None:
         elem = document.createElement("canvas")
+        elem.setAttribute("id", "glcanvas")
         elem.setAttribute("width", "640")
         elem.setAttribute("height", "480")
         elem.setAttribute("style", "border: 2px solid blue; display: block")
@@ -445,6 +450,7 @@ def main():
         window = proxy.invoke("__getter__", None, "window")
         document = proxy.invoke("__getter__", window, "document")
         test(proxy, document)
+
 
 if __name__ == "__main__":
     main()

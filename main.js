@@ -72,8 +72,15 @@ class Server {
             "__inspect__": (params) => {
                 let methods = [];
                 let properties = [];
-                const prototype = window[params[0]].prototype;
-                const parent = Object.getPrototypeOf(prototype).constructor.name
+                const constructor = window[params[0]];
+                if (constructor === undefined) {
+                    return null;
+                }
+                const prototype = constructor.prototype;
+                let parent = Object.getPrototypeOf(prototype).constructor.name;
+                if (parent === "Object") {
+                    parent = null;
+                }
                 for (const key in prototype) {
                     if (prototype.hasOwnProperty(key)) {
                         console.log(key);
