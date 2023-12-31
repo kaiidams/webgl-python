@@ -3,6 +3,7 @@ import json
 from functools import partial
 import logging
 import math
+import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -204,7 +205,52 @@ class ObjectProxy:
         return f"<ObjectProxy object; proxy={self.proxy.name}, constructor={self.constructor}, object_id={self.object_id}>"
 
 
+# glmatrix.js stub
+
+class mat4:
+    @staticmethod
+    def create():
+        out = [0] * 16
+        out[0] = out[5] = out[10] = out[15] = 1
+        return out
+
+    @staticmethod
+    def perspective(out, fovy, aspect, near, far):
+        t = 1 / math.tan(fovy / 2)
+        out[:] = [0] * 16
+        out[0] = t / aspect
+        out[5] = t
+        out[10] = 2 / (near - far)
+        out[11] = -1
+        out[14] = -1
+        return out
+
+    @staticmethod
+    def translate(out, a, v):
+        out[:] = a
+        out[12] += v[0]
+        out[13] += v[1]
+        out[14] += v[2]
+        return out
+    
+    @staticmethod
+    def rotate(out, a, rad, axis):
+        out[:] = a
+        c = math.cos(rad)
+        s = math.sin(rad)
+        o1 = a[0] * c - a[4] * s
+        o2 = a[1] * c + a[5] * s
+        o3 = -a[0] * s + a[4] * c
+        o4 = -a[1] * s + a[5] * c
+        out[0] = o1
+        out[1] = o2
+        out[4] = o3
+        out[5] = o4
+        return out
+    
+
 # WebGL Test
+
 vsSource = """
     attribute vec4 aVertexPosition;
     attribute vec4 aVertexColor;
@@ -358,7 +404,7 @@ def setColorAttribute(gl, buffers, programInfo):
     gl.enableVertexAttribArray(programInfo["attribLocations"]["vertexColor"])
 
 
-def drawScene(gl, programInfo, buffers, Float32Array):
+def drawScene(gl, programInfo, buffers, squareRotation, Float32Array):
     gl.clearColor(0.0, 0.0, 0.0, 1.0)  # Clear to black, fully opaque
     gl.clearDepth(1.0)  # Clear everything
     gl.enable(gl.DEPTH_TEST)  # Enable depth testing
@@ -380,7 +426,7 @@ def drawScene(gl, programInfo, buffers, Float32Array):
     zNear = 0.1
     zFar = 100.0
 
-    if False:
+    if True:
         projectionMatrix = mat4.create()
 
         # note: glmatrix.js always has the first argument
@@ -398,6 +444,13 @@ def drawScene(gl, programInfo, buffers, Float32Array):
             modelViewMatrix,  # matrix to translate
             [-0.0, 0.0, -6.0],
         )  # amount to translate
+
+        mat4.rotate(
+            modelViewMatrix,  # destination matrix
+            modelViewMatrix,  # matrix to rotate
+            squareRotation,  # amount to rotate in radians
+            [0, 0, 1],
+        )  # axis to rotate around
     else:
         projectionMatrix = Float32Array([
             1.8106601238250732, 0, 0, 0,
@@ -411,6 +464,9 @@ def drawScene(gl, programInfo, buffers, Float32Array):
             0, 0, 1, 0,
             0, 0, -6, 1,
         ])
+
+    projectionMatrix = Float32Array(projectionMatrix)
+    modelViewMatrix = Float32Array(modelViewMatrix)
 
     # Tell WebGL how to pull out the positions from the position
     # buffer into the vertexPosition attribute.
@@ -496,9 +552,18 @@ def test(proxy, document):
     # objects we'll be drawing.
     buffers = initBuffers(gl, Float32Array)
 
-    # Draw the scene
-    drawScene(gl, programInfo, buffers, Float32Array)
+    squareRotation = 0
+    then = time.time()
+    while True:
+        now = time.time()
 
+        deltaTime = now - then
+        then = now
+
+        # Draw the scene
+        drawScene(gl, programInfo, buffers, squareRotation, Float32Array)
+
+        squareRotation += deltaTime
 
 # main
 

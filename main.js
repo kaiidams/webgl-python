@@ -3,6 +3,35 @@
 const PROTOCOL_VERSION = "pywebgl-0.1";
 const ERROR_INTERNAL = -32603;
 
+function inspectObject(obj) {
+    const name = obj.constructor.name;
+    if (window[name] !== undefined && window[name] !== obj.constructor) {
+        throw new Exception();
+    }
+    let methods = [];
+    let properties = [];
+    let parent = Object.getPrototypeOf(obj).constructor.name;
+    if (parent === "Object") {
+        parent = null;
+    }
+    for (const key in obj) {
+        if (obj.hasOwnProperty(key)) {
+            const desc = Object.getOwnPropertyDescriptor(obj, key);
+            if (desc.value instanceof Function) {
+                methods.push(key);
+            } else {
+                properties.push(key);
+            }
+        }
+    }
+    return {
+        name: name,
+        parent: parent,
+        methods: methods,
+        properties: properties
+    };
+}
+
 class TransportWebSocket {
     constructor(uri) {
         this.uri = uri;
@@ -82,29 +111,10 @@ class Server {
         this.registerMethod(
             "__inspect__",
             (name) => {
-                let methods = [];
-                let properties = [];
-                const constructor = window[name];
-                if (constructor === undefined) {
+                if (window[name] === undefined) {
                     return null;
                 }
-                const prototype = constructor.prototype;
-                let parent = Object.getPrototypeOf(prototype).constructor.name;
-                if (parent === "Object") {
-                    parent = null;
-                }
-                for (const key in prototype) {
-                    if (prototype.hasOwnProperty(key)) {
-                        console.log(key);
-                        const desc = Object.getOwnPropertyDescriptor(prototype, key);
-                        if (desc.value instanceof Function) {
-                            methods.push(key);
-                        } else {
-                            properties.push(key);
-                        }
-                    }
-                }
-                return {parent: parent, methods: methods, properties: properties};
+                return inspectObject(window[name].prototype);
             });
     }
 
