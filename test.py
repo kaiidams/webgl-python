@@ -163,7 +163,7 @@ class ServerProxy:
     def marshalParams(self, params):
         def f(value):
             if isinstance(value, ObjectProxy):
-                return {"id": value.object_id}
+                return {"__jsonclass__": [value.constructor, value.object_id]}
             return value
         return [f(value) for value in params]
 
