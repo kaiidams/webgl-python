@@ -9,5 +9,38 @@
         <button id="test1">Test1</button>
         <button id="test2">Test2</button>
         <script src="main.js"></script>
+        <script>
+window.addEventListener("load", () => {
+    console.log(window.location.search);
+    const name = window.location.search.replace('?name=', '');
+    const remote = name == 'server_a' ? 'server_b' : 'server_a';
+    const uri = `ws://${window.location.host}/ws`;
+    const transport = new TransportWebSocket(uri);
+    const server = new Server(name, transport);
+    server.registerDefaultMethods();
+    const proxy1 = new ServerProxy(remote, transport);
+    const proxy2 = new ServerProxy('server_c', transport);
+    server.serve();
+
+    const test1Elem = document.getElementById("test1");
+    test1Elem.addEventListener("click", async (event) => {
+        event.preventDefault();
+        let g = new ObjectProxy(proxy1, null);
+        let win = await g.invoke("__getter__", "window");
+        let doc = await win.invoke("__getter__", "document");
+        let body = await doc.invoke("__getter__", "body");
+        //let res = await win.invokeMethod("alert", ["Hi!"]);
+        let x = await body.invoke("__getter__", "innerHTML");
+        console.log(x);
+    });
+
+    const test2Elem = document.getElementById("test2");
+    test2Elem.addEventListener("click", async (event) => {
+        event.preventDefault();
+        let g = new ObjectProxy(proxy2, null);
+        await g.invoke("start");
+    });
+});
+        </script>
     </body>
 </html>
