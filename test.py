@@ -206,18 +206,26 @@ class ObjectProxy:
 
 # WebGL Test
 vsSource = """
-attribute vec4 aVertexPosition;
-uniform mat4 uModelViewMatrix;
-uniform mat4 uProjectionMatrix;
-void main() {
-    gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
-}
+    attribute vec4 aVertexPosition;
+    attribute vec4 aVertexColor;
+
+    uniform mat4 uModelViewMatrix;
+    uniform mat4 uProjectionMatrix;
+
+    varying lowp vec4 vColor;
+
+    void main(void) {
+      gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
+      vColor = aVertexColor;
+    }
 """
 
 fsSource = """
-void main() {
-    gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
-}
+    varying lowp vec4 vColor;
+
+    void main(void) {
+      gl_FragColor = vColor;
+    }
 """
 
 
@@ -274,15 +282,17 @@ def loadShader(gl, type, source):
     return shader
 
 
-def initBuffers(gl, proxy):
-    positionBuffer = initPositionBuffer(gl, proxy)
+def initBuffers(gl, Float32Array):
+    positionBuffer = initPositionBuffer(gl, Float32Array)
+    colorBuffer = initColorBuffer(gl, Float32Array)
 
     return {
         "position": positionBuffer,
+        "color": colorBuffer,
     }
 
 
-def initPositionBuffer(gl, proxy):
+def initPositionBuffer(gl, Float32Array):
     # Create a buffer for the square's positions.
     positionBuffer = gl.createBuffer()
 
@@ -296,13 +306,59 @@ def initPositionBuffer(gl, proxy):
     # Now pass the list of positions into WebGL to build the
     # shape. We do this by creating a Float32Array from the
     # JavaScript array, then use it to fill the current buffer.
-    positionsArray = proxy.invoke("__new__", "Float32Array", positions)
-    gl.bufferData(gl.ARRAY_BUFFER, positionsArray, gl.STATIC_DRAW)
+    gl.bufferData(gl.ARRAY_BUFFER, Float32Array(positions), gl.STATIC_DRAW)
 
     return positionBuffer
 
 
-def drawScene(gl, programInfo, buffers, proxy):
+def initColorBuffer(gl, Float32Array):
+    colors = [
+        1.0,
+        1.0,
+        1.0,
+        1.0,  # white
+        1.0,
+        0.0,
+        0.0,
+        1.0,  # red
+        0.0,
+        1.0,
+        0.0,
+        1.0,  # green
+        0.0,
+        0.0,
+        1.0,
+        1.0,  # blue
+    ]
+
+    colorBuffer = gl.createBuffer()
+    gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer)
+    gl.bufferData(gl.ARRAY_BUFFER, Float32Array(colors), gl.STATIC_DRAW)
+
+    return colorBuffer
+
+
+# Tell WebGL how to pull out the colors from the color buffer
+# into the vertexColor attribute.
+def setColorAttribute(gl, buffers, programInfo):
+    numComponents = 4
+    type = gl.FLOAT
+    normalize = False
+    stride = 0
+    offset = 0
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffers["color"])
+    gl.vertexAttribPointer(
+        programInfo["attribLocations"]["vertexColor"],
+        numComponents,
+        type,
+        normalize,
+        stride,
+        offset,
+    )
+    gl.enableVertexAttribArray(programInfo["attribLocations"]["vertexColor"])
+
+
+def drawScene(gl, programInfo, buffers, Float32Array):
     gl.clearColor(0.0, 0.0, 0.0, 1.0)  # Clear to black, fully opaque
     gl.clearDepth(1.0)  # Clear everything
     gl.enable(gl.DEPTH_TEST)  # Enable depth testing
@@ -343,13 +399,13 @@ def drawScene(gl, programInfo, buffers, proxy):
             [-0.0, 0.0, -6.0],
         )  # amount to translate
     else:
-        projectionMatrix = proxy.invoke("__new__", "Float32Array", [
+        projectionMatrix = Float32Array([
             1.8106601238250732, 0, 0, 0,
             0, 2.4142136573791504, 0, 0,
             0, 0, -1.0020020008087158, -1,
             0, 0, -0.20020020008087158, 0,
         ])
-        modelViewMatrix = proxy.invoke("__new__", "Float32Array", [
+        modelViewMatrix = Float32Array([
             1, 0, 0, 0,
             0, 1, 0, 0,
             0, 0, 1, 0,
@@ -359,6 +415,7 @@ def drawScene(gl, programInfo, buffers, proxy):
     # Tell WebGL how to pull out the positions from the position
     # buffer into the vertexPosition attribute.
     setPositionAttribute(gl, buffers, programInfo)
+    setColorAttribute(gl, buffers, programInfo)
 
     # Tell WebGL to use our program when drawing
     gl.useProgram(programInfo["program"])
@@ -424,6 +481,7 @@ def test(proxy, document):
         "program": shaderProgram,
         "attribLocations": {
             "vertexPosition": gl.getAttribLocation(shaderProgram, "aVertexPosition"),
+            "vertexColor": gl.getAttribLocation(shaderProgram, "aVertexColor"),
         },
         "uniformLocations": {
             "projectionMatrix": gl.getUniformLocation(shaderProgram, "uProjectionMatrix"),
@@ -431,12 +489,15 @@ def test(proxy, document):
         },
     }
 
+    def Float32Array(arg):
+        return proxy.invoke("__new__", "Float32Array", arg)
+
     # Here's where we call the routine that builds all the
     # objects we'll be drawing.
-    buffers = initBuffers(gl, proxy)
+    buffers = initBuffers(gl, Float32Array)
 
     # Draw the scene
-    drawScene(gl, programInfo, buffers, proxy)
+    drawScene(gl, programInfo, buffers, Float32Array)
 
 
 # main
