@@ -91,7 +91,7 @@ class Server {
         this.transport = transport;
         this.nextObjectId = 0;
         this.liveObjects = {};
-        this.global = {};
+        this.objects = {};
         this.methods = {}
     }
 
@@ -99,7 +99,8 @@ class Server {
         this.registerMethod(
             "__getter__",
             (target, name) => {
-                if (target == null) target = this.global;
+                if (target == null)
+                    return this.objects[name];
                 return target[name];
             });
         this.registerMethod(
@@ -123,7 +124,7 @@ class Server {
     }
 
     registerObject(name, object) {
-        this.global[name] = object;
+        this.objects[name] = object;
     }
 
     serve() {
@@ -140,21 +141,27 @@ class Server {
                 const target = params.shift();
                 result = target[data.method].apply(target, params);
             }
-            this.transport.send({
-                id: data.id,
-                destination: data.source,
-                result: this.marshalResult(result)
-            });
+            if (data.id !== undefined)
+            {
+                this.transport.send({
+                    id: data.id,
+                    destination: data.source,
+                    result: this.marshalResult(result)
+                });
+            }
         } catch (e) {
             console.error(e);
-            this.transport.send({
-                id: data.id,
-                destination: data.source,
-                error: {
-                    code: ERROR_INTERNAL,
-                    message: e.message
-                }
-            });
+            if (data.id !== undefined)
+            {
+                this.transport.send({
+                    id: data.id,
+                    destination: data.source,
+                    error: {
+                        code: ERROR_INTERNAL,
+                        message: e.message
+                    }
+                });
+            }
         }
     }
 

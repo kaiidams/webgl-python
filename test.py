@@ -323,9 +323,9 @@ def setPositionAttribute(gl, buffers, programInfo):
     gl.enableVertexAttribArray(programInfo["attribLocations"]["vertexPosition"])
 
 
-def test(proxy, root):
-    print(root)
-    gl = root.getContext("webgl")
+def test(proxy):
+    canvas = proxy.get_object("canvas")
+    gl = canvas.getContext("webgl")
     gl.clearColor(0.0, 0.0, 1.0, 1.0)
     gl.clear(gl.COLOR_BUFFER_BIT)
 
@@ -380,12 +380,11 @@ def main():
             pass
         proxy.register_constructor("WebGLContext", WebGLContext)
         proxy.register_constructor("WebGLRenderingContext", WebGLContext)
-        class RootObject(ObjectProxy, webgl.ProxyInterfaceBase):
+        class CanvasObject(ObjectProxy, webgl.ProxyInterfaceBase):
             def getContext(self, *args) -> Any: return self._invoke_function("getContext", *args)
-        proxy.register_constructor("RootObject", RootObject)
+        proxy.register_constructor("CanvasObject", CanvasObject)
 
-        root = proxy.invoke("__getter__", None, "root")
-        test(proxy, root)
+        test(proxy)
 
 
 if __name__ == "__main__":

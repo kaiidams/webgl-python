@@ -11,7 +11,7 @@
 "use strict";
 
 window.addEventListener("load", () => {
-    class RootObject {
+    class CanvasObject {
         constructor(elem) {
             this.elem = elem;
         }
@@ -27,7 +27,7 @@ window.addEventListener("load", () => {
     const transport = new TransportWebSocket(uri);
     const server = new Server(name, transport);
     server.registerDefaultMethods();
-    server.registerObject("root", new RootObject(elem));
+    server.registerObject("canvas", new CanvasObject(elem));
     server.serve();
 });
         </script>

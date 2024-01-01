@@ -127,15 +127,29 @@ class ServerProxy:
     def register_constructor(self, name: str, func) -> None:
         self.constructors[name] = func
 
-    def invoke(self, method, *params):
-        request_id = self.next_request_id
-        self.next_request_id += 1
-        self.transport.send({
-            "id": request_id,
+    def get_object(self, name):
+        return self._invoke(False, "__getter__", None, name)
+
+    def invoke_function(self, method, *params):
+        return self._invoke(False, method, *params)
+
+    def invoke_procedure(self, method, *params):
+        self._invoke(True, method, *params)
+
+    def _invoke(self, no_wait, method, *params):
+        data = {
             "destination": self.name,
             "method": method,
             "params": self.marshalParams(params),
-        })
+        }
+        if no_wait:
+            self.transport.send(data)
+            return
+
+        request_id = self.next_request_id
+        self.next_request_id += 1
+        data["id"] = request_id
+        self.transport.send(data)
         data = self.transport.wait_until(self.name, request_id)
         if "error" in data:
             error = data["error"]
@@ -177,12 +191,12 @@ class ObjectProxy:
     def _invoke_function(self, name, *args):
         args = list(args)
         args.insert(0, None if self.object_id is None else self)
-        return self.proxy.invoke(name, *args)
+        return self.proxy.invoke_function(name, *args)
 
     def _invoke_procedure(self, name, *args):
         args = list(args)
         args.insert(0, None if self.object_id is None else self)
-        return self.proxy.invoke(name, *args)
+        self.proxy.invoke_procedure(name, *args)
 
     def _get_attribute(self, name):
         constructor = self.constructor
