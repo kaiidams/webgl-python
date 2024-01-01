@@ -565,6 +565,7 @@ def test(proxy, document):
 
         squareRotation += deltaTime
 
+
 # main
 
 def main():
