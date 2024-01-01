@@ -363,6 +363,7 @@ def test(proxy):
 
         squareRotation += deltaTime
         proxy.flush()
+        time.sleep(0.01)
 
 
 # main
@@ -377,12 +378,21 @@ def main():
             class _Class(ObjectProxy, v):
                 pass
             proxy.register_constructor(k, _Class)
-        class WebGLContext(ObjectProxy, webgl.WebGLRenderingContextBase, webgl.WebGLRenderingContextOverloads):
+
+        class WebGLContext(
+            ObjectProxy,
+            webgl.WebGLRenderingContextBase,
+            webgl.WebGLRenderingContextOverloads
+        ):
             pass
+
         proxy.register_constructor("WebGLContext", WebGLContext)
         proxy.register_constructor("WebGLRenderingContext", WebGLContext)
+
         class CanvasObject(ObjectProxy, webgl.ProxyInterfaceBase):
-            def getContext(self, *args) -> Any: return self._invoke_function("getContext", *args)
+            def getContext(self, *args) -> Any:
+                return self._invoke_function("getContext", *args)
+
         proxy.register_constructor("CanvasObject", CanvasObject)
 
         test(proxy)
