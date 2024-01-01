@@ -1,3 +1,7 @@
+# The code is translated from the tutorial code from MDN. See
+# https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Tutorial/Using_textures_in_WebGL
+# for the original JavaScript code.
+
 from typing import Any
 import math
 import time
@@ -350,7 +354,7 @@ def loadTexture(gl, url):
     border = 0
     srcFormat = gl.RGBA
     srcType = gl.UNSIGNED_BYTE
-    with Image.open('debian-logo.png') as im:
+    with Image.open(url) as im:
         # im = im.resize(size=(64, 64))
         pixel = [y for x in im.getdata() for y in x]
         width, height = im.size
@@ -406,7 +410,7 @@ def setColorAttribute(gl, buffers, programInfo):
     gl.enableVertexAttribArray(programInfo["attribLocations"]["vertexColor"])
 
 
-def drawScene(gl, programInfo, buffers, cubeRotation):
+def drawScene(gl, programInfo, buffers, texture, cubeRotation):
     gl.clearColor(0.0, 0.0, 0.0, 1.0)  # Clear to black, fully opaque
     gl.clearDepth(1.0)  # Clear everything
     gl.enable(gl.DEPTH_TEST)  # Enable depth testing
@@ -485,6 +489,15 @@ def drawScene(gl, programInfo, buffers, cubeRotation):
         Float32Array(modelViewMatrix),
     )
 
+    # Tell WebGL we want to affect texture unit 0
+    gl.activeTexture(gl.TEXTURE0)
+
+    # Bind the texture to texture unit 0
+    gl.bindTexture(gl.TEXTURE_2D, texture)
+
+    # Tell the shader we bound the texture to texture unit 0
+    gl.uniform1i(programInfo["uniformLocations"]["uSampler"], 0)
+
     vertexCount = 36
     type = gl.UNSIGNED_SHORT
     offset = 0
@@ -561,7 +574,7 @@ def test(proxy):
     buffers = initBuffers(gl)
 
     # Load texture
-    texture = loadTexture(gl, "cubetexture.png")
+    texture = loadTexture(gl, "debian-logo.png")
     # Flip image pixels into the bottom-to-top order that WebGL expects.
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, True)
 
@@ -574,7 +587,7 @@ def test(proxy):
         then = now
 
         # Draw the scene
-        drawScene(gl, programInfo, buffers, squareRotation)
+        drawScene(gl, programInfo, buffers, texture, squareRotation)
 
         squareRotation += deltaTime
         proxy.flush()
