@@ -1,208 +1,19 @@
-from websockets.sync.client import connect
-import json
-from functools import partial
-import logging
+from typing import Any
 import math
 import time
+import logging
+from rpc import TransportWebsocket, ObjectProxy, ServerProxy
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class ProxyException(Exception):
-    pass
+# Float32Array
 
-
-class TransportWebsocket:
-    def __init__(self, uri):
-        self.uri = uri
-        self.ws = None
-        self.server = None
-        self.serverProxies = {}
-
-    def __enter__(self):
-        self.ws = connect(self.uri).__enter__()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.ws.__exit__(exc_type, exc_val, exc_tb)
-
-    def run(self, server):
-        self.server = server
-        with connect(self.uri) as self.ws:
-            self.send({
-                "destination": None,
-                "method": "__register__",
-                "params": [server.name]
-            })
-
-            while True:
-                self.wait_until(None, None)
-
-    def wait_until(self, source, request_id):
-        while True:
-            data = self.ws.recv()
-            data = json.loads(data)
-            logger.info('<-- %s', data)
-            assert data["jsonrpc"] == "pywebgl-0.1"
-            if "error" in data:
-                if source and data["source"] == source and data["id"] == request_id:
-                    return data
-            elif "result" in data:
-                if source and data["source"] == source and data["id"] == request_id:
-                    return data
-                proxy = self.serverProxies[data["source"]]
-                proxy.onReceive(data)
-            elif self.server is not None:
-                self.server.onReceive(data)
-
-    def send(self, data):
-        logger.info('--> %s', data)
-        data["jsonrpc"] = "pywebgl-0.1"
-        self.ws.send(json.dumps(data))
-
-
-class Server:
-    def __init__(self, name, transport):
-        self.name = name
-        self.transport = transport
-        self.nextobject_id = 0
-        self.liveObjects = {}
-        self.global_ = None
-
-    def serve(self, app):
-        self.global_ = app
-        self.transport.run(self)
-
-    def onReceive(self, data):
-        params = self.unmarshalParams(data["params"])
-        target = params.pop(0)
-        if target is None:
-            target = self.global_
-
-        if data["method"] == "__getter__":
-            name = params[1]
-            result = getattr(target, name)
-        else:
-            method = getattr(target, data["method"])
-            result = method(*params)
-
-        self.transport.send({
-            "id": data["id"],
-            "destination": data["source"],
-            "result": self.marshalResult(result)
-        })
-
-    def unmarshalParams(self, params):
-        def f(value):
-            if isinstance(value, dict):
-                return self.liveObjects[value.id]
-            else:
-                return value
-        return [f(value) for value in params]
-
-    def marshalResult(self, result):
-        if result is None or type(result) in (int, float, str, bool):
-            return result
-
-        if not hasattr(result, "_object_id"):
-            object_id = self.nextobject_id
-            self.nextobject_id += 1
-            self.liveObjects[object_id] = result
-            result._object_id = object_id
-
-        return {
-            "id": result._object_id,
-            "class": "object",
-        }
-
-
-class ServerProxy:
-    def __init__(self, name, transport):
-        self.transport = transport
-        self.name = name
-        self.next_request_id = 0
-        self.liveObjects = {}
-        self.pendingRequests = {}
-        self.transport.serverProxies[self.name] = self
-        self.constructors = {}
-
-    def invoke(self, method, *params):
-        request_id = self.next_request_id
-        self.next_request_id += 1
-        self.transport.send({
-            "id": request_id,
-            "destination": self.name,
-            "method": method,
-            "params": self.marshalParams(params),
-        })
-        data = self.transport.wait_until(self.name, request_id)
-        if "error" in data:
-            error = data["error"]
-            raise ProxyException(error["code"], error["message"])
-        return self.unmarshalResult(data["result"])
-
-    def onReceive(self, data):
-        fut = self.pendingRequests[data["id"]]
-        del self.pendingRequests[data["id"]]
-        fut.set_result()
-
-    def unmarshalResult(self, result):
-        if result is None or type(result) in (int, float, str, bool):
-            return result
-        assert isinstance(result, dict)
-        if "__jsonclass__" not in result:
-            return result
-        jsonclass = result['__jsonclass__']
-        constructor = jsonclass[0]
-        object_id = jsonclass[1]
-        print("Class:", constructor)
-        print("object_id:", object_id)
-        self.fetch_constructors(constructor)
-        return ObjectProxy(self, constructor, object_id)
-
-    def marshalParams(self, params):
-        def f(value):
-            if isinstance(value, ObjectProxy):
-                return {"__jsonclass__": [value.constructor, value.object_id]}
-            return value
-        return [f(value) for value in params]
-
-    def fetch_constructors(self, constructor):
-        while constructor != "Object" and constructor != "TypedArray":
-            if constructor in self.constructors:
-                break
-            spec = self.invoke("__inspect__", constructor)
-            if spec is None:
-                break
-            self.constructors[constructor] = spec
-            constructor = spec["parent"]
-
-
-class ObjectProxy:
-    def __init__(self, proxy, constructor, object_id):
-        self.proxy = proxy
-        self.constructor = constructor
-        self.object_id = object_id
-
-    def invoke(self, method, *args):
-        args = list(args)
-        args.insert(0, None if self.object_id is None else self)
-        return self.proxy.invoke(method, *args)
-
-    def __getattr__(self, name):
-        constructor = self.constructor
-        while constructor:
-            spec = self.proxy.constructors[constructor]
-            print(spec)
-            if name in spec["properties"]:
-                return self.invoke("__getter__", name)
-            if name in spec["methods"]:
-                return partial(self.invoke, name)
-            constructor = spec["parent"]
-
-    def __str__(self):
-        return f"<ObjectProxy object; proxy={self.proxy.name}, constructor={self.constructor}, object_id={self.object_id}>"
+def Float32Array(v):
+    return {
+        "__jsonclass__": ["Float32Array", v]
+    }
 
 
 # glmatrix.js stub
@@ -328,9 +139,9 @@ def loadShader(gl, type, source):
     return shader
 
 
-def initBuffers(gl, Float32Array):
-    positionBuffer = initPositionBuffer(gl, Float32Array)
-    colorBuffer = initColorBuffer(gl, Float32Array)
+def initBuffers(gl):
+    positionBuffer = initPositionBuffer(gl)
+    colorBuffer = initColorBuffer(gl)
 
     return {
         "position": positionBuffer,
@@ -338,7 +149,7 @@ def initBuffers(gl, Float32Array):
     }
 
 
-def initPositionBuffer(gl, Float32Array):
+def initPositionBuffer(gl):
     # Create a buffer for the square's positions.
     positionBuffer = gl.createBuffer()
 
@@ -357,7 +168,7 @@ def initPositionBuffer(gl, Float32Array):
     return positionBuffer
 
 
-def initColorBuffer(gl, Float32Array):
+def initColorBuffer(gl):
     colors = [
         1.0,
         1.0,
@@ -404,7 +215,7 @@ def setColorAttribute(gl, buffers, programInfo):
     gl.enableVertexAttribArray(programInfo["attribLocations"]["vertexColor"])
 
 
-def drawScene(gl, programInfo, buffers, squareRotation, Float32Array):
+def drawScene(gl, programInfo, buffers, squareRotation):
     gl.clearColor(0.0, 0.0, 0.0, 1.0)  # Clear to black, fully opaque
     gl.clearDepth(1.0)  # Clear everything
     gl.enable(gl.DEPTH_TEST)  # Enable depth testing
@@ -422,7 +233,8 @@ def drawScene(gl, programInfo, buffers, squareRotation, Float32Array):
     # and 100 units away from the camera.
 
     fieldOfView = (45 * math.pi) / 180  # in radians
-    aspect = gl.canvas.clientWidth / gl.canvas.clientHeight
+    # aspect = gl.canvas.clientWidth / gl.canvas.clientHeight
+    aspect = 640 / 480
     zNear = 0.1
     zFar = 100.0
 
@@ -465,9 +277,6 @@ def drawScene(gl, programInfo, buffers, squareRotation, Float32Array):
             0, 0, -6, 1,
         ])
 
-    projectionMatrix = Float32Array(projectionMatrix)
-    modelViewMatrix = Float32Array(modelViewMatrix)
-
     # Tell WebGL how to pull out the positions from the position
     # buffer into the vertexPosition attribute.
     setPositionAttribute(gl, buffers, programInfo)
@@ -480,12 +289,12 @@ def drawScene(gl, programInfo, buffers, squareRotation, Float32Array):
     gl.uniformMatrix4fv(
         programInfo["uniformLocations"]["projectionMatrix"],
         False,
-        projectionMatrix,
+        Float32Array(projectionMatrix),
     )
     gl.uniformMatrix4fv(
         programInfo["uniformLocations"]["modelViewMatrix"],
         False,
-        modelViewMatrix,
+        Float32Array(modelViewMatrix),
     )
 
     offset = 0
@@ -514,19 +323,11 @@ def setPositionAttribute(gl, buffers, programInfo):
     gl.enableVertexAttribArray(programInfo["attribLocations"]["vertexPosition"])
 
 
-def test(proxy, document):
-    print(document)
-    elem = document.getElementById("glcanvas")
-    if elem is None:
-        elem = document.createElement("canvas")
-        elem.setAttribute("id", "glcanvas")
-        elem.setAttribute("width", "640")
-        elem.setAttribute("height", "480")
-        elem.setAttribute("style", "border: 2px solid blue; display: block")
-        document.body.appendChild(elem)
-    gl = elem.getContext("webgl")
-    # gl.clearColor(0.0, 0.0, 1.0, 1.0)
-    # gl.clear(gl.COLOR_BUFFER_BIT)
+def test(proxy, root):
+    print(root)
+    gl = root.getContext("webgl")
+    gl.clearColor(0.0, 0.0, 1.0, 1.0)
+    gl.clear(gl.COLOR_BUFFER_BIT)
 
     shaderProgram = initShaderProgram(gl, vsSource, fsSource)
 
@@ -545,12 +346,9 @@ def test(proxy, document):
         },
     }
 
-    def Float32Array(arg):
-        return proxy.invoke("__new__", "Float32Array", arg)
-
     # Here's where we call the routine that builds all the
     # objects we'll be drawing.
-    buffers = initBuffers(gl, Float32Array)
+    buffers = initBuffers(gl)
 
     squareRotation = 0
     then = time.time()
@@ -561,7 +359,7 @@ def test(proxy, document):
         then = now
 
         # Draw the scene
-        drawScene(gl, programInfo, buffers, squareRotation, Float32Array)
+        drawScene(gl, programInfo, buffers, squareRotation)
 
         squareRotation += deltaTime
 
@@ -569,14 +367,25 @@ def test(proxy, document):
 # main
 
 def main():
+    import webgl
+
     uri = "ws://localhost:8000/ws"
     with TransportWebsocket(uri) as transport:
-        proxy = ServerProxy("server_a", transport)
-        transport.server = Server("server_c", transport)
+        proxy = ServerProxy("browser", transport)
+        for k, v in webgl.INTERFACES.items():
+            class _Class(ObjectProxy, v):
+                pass
+            proxy.register_constructor(k, _Class)
+        class WebGLContext(ObjectProxy, webgl.WebGLRenderingContextBase, webgl.WebGLRenderingContextOverloads):
+            pass
+        proxy.register_constructor("WebGLContext", WebGLContext)
+        proxy.register_constructor("WebGLRenderingContext", WebGLContext)
+        class RootObject(ObjectProxy, webgl.ProxyInterfaceBase):
+            def getContext(self, *args) -> Any: return self._invoke_function("getContext", *args)
+        proxy.register_constructor("RootObject", RootObject)
 
-        window = proxy.invoke("__getter__", None, "window")
-        document = proxy.invoke("__getter__", window, "document")
-        test(proxy, document)
+        root = proxy.invoke("__getter__", None, "root")
+        test(proxy, root)
 
 
 if __name__ == "__main__":

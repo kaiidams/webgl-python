@@ -91,7 +91,7 @@ class Server {
         this.transport = transport;
         this.nextObjectId = 0;
         this.liveObjects = {};
-        this.global = { window: window };
+        this.global = {};
         this.methods = {}
     }
 
@@ -120,6 +120,10 @@ class Server {
 
     registerMethod(name, method) {
         this.methods[name] = method;
+    }
+
+    registerObject(name, object) {
+        this.global[name] = object;
     }
 
     serve() {
@@ -161,8 +165,13 @@ class Server {
             }
             if (value instanceof Object) {
                 if (value.__jsonclass__ !== undefined) {
+                    const constructor = value.__jsonclass__[0];
                     const objectId = value.__jsonclass__[1];
-                    return this.liveObjects[objectId];
+                    if (constructor == "Float32Array") {
+                        return new Float32Array(objectId);
+                    } else {
+                        return this.liveObjects[objectId];
+                    }
                 }
                 return value;
             }
