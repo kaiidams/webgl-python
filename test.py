@@ -16,6 +16,10 @@ def make_array(n, v):
     }
 
 
+def Uint8Array(v):
+    return make_array("Uint8Array", v)
+
+
 def Uint16Array(v):
     return make_array("Uint16Array", v)
 
@@ -87,25 +91,27 @@ class mat4:
 
 vsSource = """
     attribute vec4 aVertexPosition;
-    attribute vec4 aVertexColor;
+    attribute vec2 aTextureCoord;
 
     uniform mat4 uModelViewMatrix;
     uniform mat4 uProjectionMatrix;
 
-    varying lowp vec4 vColor;
+    varying highp vec2 vTextureCoord;
 
     void main(void) {
       gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
-      vColor = aVertexColor;
+      vTextureCoord = aTextureCoord;
     }
 """
 
 fsSource = """
-    varying lowp vec4 vColor;
+  varying highp vec2 vTextureCoord;
 
-    void main(void) {
-      gl_FragColor = vColor;
-    }
+  uniform sampler2D uSampler;
+
+  void main(void) {
+    gl_FragColor = texture2D(uSampler, vTextureCoord);
+  }
 """
 
 
@@ -165,11 +171,13 @@ def loadShader(gl, type, source):
 def initBuffers(gl):
     positionBuffer = initPositionBuffer(gl)
     colorBuffer = initColorBuffer(gl)
+    textureCoordBuffer = initTextureBuffer(gl)
     indexBuffer = initIndexBuffer(gl)
 
     return {
         "position": positionBuffer,
         "color": colorBuffer,
+        "textureCoord": textureCoordBuffer,
         "indices": indexBuffer,
     }
 
@@ -298,6 +306,121 @@ def initIndexBuffer(gl):
     return indexBuffer
 
 
+def initTextureBuffer(gl):
+    textureCoordBuffer = gl.createBuffer()
+    gl.bindBuffer(gl.ARRAY_BUFFER, textureCoordBuffer)
+
+    textureCoordinates = [
+        # Front
+        0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0,
+        # Back
+        0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0,
+        # Top
+        0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0,
+        # Bottom
+        0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0,
+        # Right
+        0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0,
+        # Left
+        0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0,
+    ]
+
+    gl.bufferData(
+        gl.ARRAY_BUFFER,
+        Float32Array(textureCoordinates),
+        gl.STATIC_DRAW,
+    )
+
+    return textureCoordBuffer
+
+
+#
+# Initialize a texture and load an image.
+# When the image finished loading copy it into the texture.
+#
+def loadTexture(gl, url):
+    texture = gl.createTexture()
+    gl.bindTexture(gl.TEXTURE_2D, texture)
+
+    # Because images have to be downloaded over the internet
+    # they might take a moment until they are ready.
+    # Until then put a single pixel in the texture so we can
+    # use it immediately. When the image has finished downloading
+    # we'll update the texture with the contents of the image.
+    level = 0
+    internalFormat = gl.RGBA
+    width = 4
+    height = 4
+    border = 0
+    srcFormat = gl.RGBA
+    srcType = gl.UNSIGNED_BYTE
+    pixel = Uint8Array([
+        0, 0, 0, 255,
+        0, 0, 255, 255,
+        0, 255, 0, 255,
+        255, 0, 0, 255,
+        0, 255, 255, 255,
+        255, 0, 255, 255,
+        0, 0, 255, 255,
+        255, 255, 255, 255,
+        0, 0, 0, 255,
+        0, 0, 255, 255,
+        0, 255, 0, 255,
+        255, 0, 0, 255,
+        0, 255, 255, 255,
+        255, 0, 255, 255,
+        0, 0, 255, 255,
+        255, 255, 255, 255,
+    ])  # opaque blue
+    gl.texImage2D(
+        gl.TEXTURE_2D,
+        level,
+        internalFormat,
+        width,
+        height,
+        border,
+        srcFormat,
+        srcType,
+        pixel,
+    )
+
+    # image = new Image()
+    # image.onload = () => {
+    #     gl.bindTexture(gl.TEXTURE_2D, texture)
+    #     gl.texImage2D(
+    #         gl.TEXTURE_2D,
+    #         level,
+    #         internalFormat,
+    #         srcFormat,
+    #         srcType,
+    #         image,
+    #     )
+
+    # Yes, it's a power of 2. Generate mips.
+    gl.generateMipmap(gl.TEXTURE_2D)
+        # # WebGL1 has different requirements for power of 2 images
+        # # vs. non power of 2 images so check if the image is a
+        # # power of 2 in both dimensions.
+        # if isPowerOf2(image.width) and isPowerOf2(image.height):
+        #     # Yes, it's a power of 2. Generate mips.
+        #     gl.generateMipmap(gl.TEXTURE_2D)
+        # } else {
+        #     # No, it's not a power of 2. Turn off mips and set
+        #     # wrapping to clamp to edge
+        #     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+        #     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+        #     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+        # }
+        # }
+        # image.src = url
+
+    return texture
+
+
+def isPowerOf2(value):
+    return (value & (value - 1)) == 0
+
+
 # Tell WebGL how to pull out the colors from the color buffer
 # into the vertexColor attribute.
 def setColorAttribute(gl, buffers, programInfo):
@@ -372,7 +495,7 @@ def drawScene(gl, programInfo, buffers, cubeRotation):
             modelViewMatrix,  # matrix to rotate
             cubeRotation * 0.7,  # amount to rotate in radians
             [0, 1, 0],
-        );  # axis to rotate around (Y)
+        )  # axis to rotate around (Y)
     else:
         projectionMatrix = Float32Array([
             1.8106601238250732, 0, 0, 0,
@@ -390,7 +513,8 @@ def drawScene(gl, programInfo, buffers, cubeRotation):
     # Tell WebGL how to pull out the positions from the position
     # buffer into the vertexPosition attribute.
     setPositionAttribute(gl, buffers, programInfo)
-    setColorAttribute(gl, buffers, programInfo)
+    # setColorAttribute(gl, buffers, programInfo)
+    setTextureAttribute(gl, buffers, programInfo)
 
     # Tell WebGL which indices to use to index the vertices
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers["indices"])
@@ -414,6 +538,25 @@ def drawScene(gl, programInfo, buffers, cubeRotation):
     type = gl.UNSIGNED_SHORT
     offset = 0
     gl.drawElements(gl.TRIANGLES, vertexCount, type, offset)
+
+
+# tell webgl how to pull out the texture coordinates from buffer
+def setTextureAttribute(gl, buffers, programInfo):
+    num = 2  # every coordinate composed of 2 values
+    type = gl.FLOAT  # the data in the buffer is 32-bit float
+    normalize = False  # don't normalize
+    stride = 0  # how many bytes to get from one set to the next
+    offset = 0  # how many bytes inside the buffer to start from
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffers["textureCoord"])
+    gl.vertexAttribPointer(
+        programInfo["attribLocations"]["textureCoord"],
+        num,
+        type,
+        normalize,
+        stride,
+        offset,
+    )
+    gl.enableVertexAttribArray(programInfo["attribLocations"]["textureCoord"])
 
 
 # Tell WebGL how to pull out the positions from the position
@@ -452,17 +595,24 @@ def test(proxy):
         "program": shaderProgram,
         "attribLocations": {
             "vertexPosition": gl.getAttribLocation(shaderProgram, "aVertexPosition"),
-            "vertexColor": gl.getAttribLocation(shaderProgram, "aVertexColor"),
+            # "vertexColor": gl.getAttribLocation(shaderProgram, "aVertexColor"),
+            "textureCoord": gl.getAttribLocation(shaderProgram, "aTextureCoord"),
         },
         "uniformLocations": {
             "projectionMatrix": gl.getUniformLocation(shaderProgram, "uProjectionMatrix"),
             "modelViewMatrix": gl.getUniformLocation(shaderProgram, "uModelViewMatrix"),
+            "uSampler": gl.getUniformLocation(shaderProgram, "uSampler"),
         },
     }
 
     # Here's where we call the routine that builds all the
     # objects we'll be drawing.
     buffers = initBuffers(gl)
+
+    # Load texture
+    texture = loadTexture(gl, "cubetexture.png")
+    # Flip image pixels into the bottom-to-top order that WebGL expects.
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, True)
 
     squareRotation = 0
     then = time.time()

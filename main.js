@@ -134,6 +134,8 @@ class Server {
                         return new Float32Array(objectId);
                     } else if (constructor == "Uint16Array") {
                         return new Uint16Array(objectId);
+                    } else if (constructor == "Uint8Array") {
+                        return new Uint8Array(objectId);
                     } else {
                         return this.liveObjects[objectId];
                     }
