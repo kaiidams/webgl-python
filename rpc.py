@@ -1,10 +1,11 @@
-from typing import Optional
 from websockets.sync.client import connect
 import json
 from functools import partial
 import logging
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.ERROR)
+
 
 PROTOCOL_VERSION = "2.0"
 

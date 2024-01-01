@@ -8,6 +8,7 @@ class TransportWebSocket {
         this.uri = uri;
         this.ws = null;
         this.server = null;
+        this.logging = false;
     }
 
     start(server) {
@@ -24,21 +25,21 @@ class TransportWebSocket {
         
         this.ws.onmessage = (event) => {
             const packet = JSON.parse(event.data);
-            console.log('<--', packet.body);
+            if (this.logging) console.log('<--', packet.body);
             this.server.onReceive(packet.from, packet.body);
         };
 
         this.ws.onclose = (event) => {
-            console.log(event);
+            if (this.logging) console.log(event);
         }
 
         this.ws.onerror = (event) => {
-            console.log(event);
+            if (this.logging) console.log(event);
         }
     }
 
     send(to, body) {
-        console.log('-->', body);
+        if (this.logging) console.log('-->', body);
         const packet = {
             to: to,
             body: body
