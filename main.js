@@ -132,6 +132,8 @@ class Server {
                     const objectId = value.__jsonclass__[1];
                     if (constructor == "Float32Array") {
                         return new Float32Array(objectId);
+                    } else if (constructor == "Uint16Array") {
+                        return new Uint16Array(objectId);
                     } else {
                         return this.liveObjects[objectId];
                     }

@@ -8,12 +8,20 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# Float32Array
+# arrays
+
+def make_array(n, v):
+    return {
+        "__jsonclass__": [n, v]
+    }
+
+
+def Uint16Array(v):
+    return make_array("Uint16Array", v)
+
 
 def Float32Array(v):
-    return {
-        "__jsonclass__": ["Float32Array", v]
-    }
+    return make_array("Float32Array", v)
 
 
 # glmatrix.js stub
@@ -43,7 +51,7 @@ class mat4:
         out[13] += v[1]
         out[14] += v[2]
         return out
-    
+
     @staticmethod
     def rotate(out, a, rad, axis):
         out[:] = a
@@ -58,7 +66,22 @@ class mat4:
         out[4] = o3
         out[5] = o4
         return out
-    
+
+    @staticmethod
+    def rotate2(out, a, rad, axis):
+        out[:] = a
+        c = math.cos(rad)
+        s = math.sin(rad)
+        o1 = a[0] * c - a[8] * s
+        o2 = a[2] * c + a[10] * s
+        o3 = -a[0] * s + a[8] * c
+        o4 = -a[2] * s + a[10] * c
+        out[0] = o1
+        out[2] = o2
+        out[8] = o3
+        out[10] = o4
+        return out
+
 
 # WebGL Test
 
@@ -142,10 +165,12 @@ def loadShader(gl, type, source):
 def initBuffers(gl):
     positionBuffer = initPositionBuffer(gl)
     colorBuffer = initColorBuffer(gl)
+    indexBuffer = initIndexBuffer(gl)
 
     return {
         "position": positionBuffer,
         "color": colorBuffer,
+        "indices": indexBuffer,
     }
 
 
@@ -158,8 +183,26 @@ def initPositionBuffer(gl):
     gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer)
 
     # Now create an array of positions for the square.
-    positions = [1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, -1.0]
+    positions = [
+        # Front face
+        -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 1.0,
 
+        # Back face
+        -1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, -1.0, -1.0,
+
+        # Top face
+        -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0,
+
+        # Bottom face
+        -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, 1.0, -1.0, 1.0, -1.0, -1.0, 1.0,
+
+        # Right face
+        1.0, -1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0,
+
+        # Left face
+        -1.0, -1.0, -1.0, -1.0, -1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, -1.0,
+    ]
+  
     # Now pass the list of positions into WebGL to build the
     # shape. We do this by creating a Float32Array from the
     # JavaScript array, then use it to fill the current buffer.
@@ -169,30 +212,90 @@ def initPositionBuffer(gl):
 
 
 def initColorBuffer(gl):
-    colors = [
-        1.0,
-        1.0,
-        1.0,
-        1.0,  # white
-        1.0,
-        0.0,
-        0.0,
-        1.0,  # red
-        0.0,
-        1.0,
-        0.0,
-        1.0,  # green
-        0.0,
-        0.0,
-        1.0,
-        1.0,  # blue
+    faceColors = [
+        [1.0, 1.0, 1.0, 1.0],  # Front face: white
+        [1.0, 0.0, 0.0, 1.0],  # Back face: red
+        [0.0, 1.0, 0.0, 1.0],  # Top face: green
+        [0.0, 0.0, 1.0, 1.0],  # Bottom face: blue
+        [1.0, 1.0, 0.0, 1.0],  # Right face: yellow
+        [1.0, 0.0, 1.0, 1.0],  # Left face: purple
     ]
+
+    # Convert the array of colors into a table for all the vertices.
+
+    colors = []
+
+    for j in range(len(faceColors)):
+        c = faceColors[j]
+        # Repeat each color four times for the four vertices of the face
+        colors.extend(c)
+        colors.extend(c)
+        colors.extend(c)
+        colors.extend(c)
 
     colorBuffer = gl.createBuffer()
     gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer)
     gl.bufferData(gl.ARRAY_BUFFER, Float32Array(colors), gl.STATIC_DRAW)
 
     return colorBuffer
+
+
+def initIndexBuffer(gl):
+    indexBuffer = gl.createBuffer()
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer)
+
+    # This array defines each face as two triangles, using the
+    # indices into the vertex array to specify each triangle's
+    # position.
+
+    indices = [
+        0,
+        1,
+        2,
+        0,
+        2,
+        3,  # front
+        4,
+        5,
+        6,
+        4,
+        6,
+        7,  # back
+        8,
+        9,
+        10,
+        8,
+        10,
+        11,  # top
+        12,
+        13,
+        14,
+        12,
+        14,
+        15,  # bottom
+        16,
+        17,
+        18,
+        16,
+        18,
+        19,  # right
+        20,
+        21,
+        22,
+        20,
+        22,
+        23,  # left
+    ]
+
+    # Now send the element array to GL
+
+    gl.bufferData(
+        gl.ELEMENT_ARRAY_BUFFER,
+        Uint16Array(indices),
+        gl.STATIC_DRAW,
+    )
+
+    return indexBuffer
 
 
 # Tell WebGL how to pull out the colors from the color buffer
@@ -215,7 +318,7 @@ def setColorAttribute(gl, buffers, programInfo):
     gl.enableVertexAttribArray(programInfo["attribLocations"]["vertexColor"])
 
 
-def drawScene(gl, programInfo, buffers, squareRotation):
+def drawScene(gl, programInfo, buffers, cubeRotation):
     gl.clearColor(0.0, 0.0, 0.0, 1.0)  # Clear to black, fully opaque
     gl.clearDepth(1.0)  # Clear everything
     gl.enable(gl.DEPTH_TEST)  # Enable depth testing
@@ -260,9 +363,16 @@ def drawScene(gl, programInfo, buffers, squareRotation):
         mat4.rotate(
             modelViewMatrix,  # destination matrix
             modelViewMatrix,  # matrix to rotate
-            squareRotation,  # amount to rotate in radians
+            cubeRotation,  # amount to rotate in radians
             [0, 0, 1],
         )  # axis to rotate around
+
+        mat4.rotate2(
+            modelViewMatrix,  # destination matrix
+            modelViewMatrix,  # matrix to rotate
+            cubeRotation * 0.7,  # amount to rotate in radians
+            [0, 1, 0],
+        );  # axis to rotate around (Y)
     else:
         projectionMatrix = Float32Array([
             1.8106601238250732, 0, 0, 0,
@@ -282,6 +392,9 @@ def drawScene(gl, programInfo, buffers, squareRotation):
     setPositionAttribute(gl, buffers, programInfo)
     setColorAttribute(gl, buffers, programInfo)
 
+    # Tell WebGL which indices to use to index the vertices
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers["indices"])
+
     # Tell WebGL to use our program when drawing
     gl.useProgram(programInfo["program"])
 
@@ -297,15 +410,16 @@ def drawScene(gl, programInfo, buffers, squareRotation):
         Float32Array(modelViewMatrix),
     )
 
+    vertexCount = 36
+    type = gl.UNSIGNED_SHORT
     offset = 0
-    vertexCount = 4
-    gl.drawArrays(gl.TRIANGLE_STRIP, offset, vertexCount)
+    gl.drawElements(gl.TRIANGLES, vertexCount, type, offset)
 
 
 # Tell WebGL how to pull out the positions from the position
 # buffer into the vertexPosition attribute.
 def setPositionAttribute(gl, buffers, programInfo):
-    numComponents = 2  # pull out 2 values per iteration
+    numComponents = 3  # pull out 2 values per iteration
     type = gl.FLOAT  # the data in the buffer is 32bit floats
     normalize = False  # don't normalize
     stride = 0  # how many bytes to get from one set of values to the next
