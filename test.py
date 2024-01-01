@@ -39,13 +39,13 @@ class mat4:
 
     @staticmethod
     def perspective(out, fovy, aspect, near, far):
-        t = 1 / math.tan(fovy / 2)
+        f = 1 / math.tan(fovy / 2)
         out[:] = [0] * 16
-        out[0] = t / aspect
-        out[5] = t
-        out[10] = 2 / (near - far)
+        out[0] = f / aspect
+        out[5] = f
+        out[10] = (near + far) / (near - far)
         out[11] = -1
-        out[14] = -1
+        out[14] = 2 * far * near / (near - far)
         return out
 
     @staticmethod
@@ -58,32 +58,29 @@ class mat4:
 
     @staticmethod
     def rotate(out, a, rad, axis):
-        out[:] = a
+        a = a[:]
+        x, y, z = axis
         c = math.cos(rad)
         s = math.sin(rad)
-        o1 = a[0] * c - a[4] * s
-        o2 = a[1] * c + a[5] * s
-        o3 = -a[0] * s + a[4] * c
-        o4 = -a[1] * s + a[5] * c
-        out[0] = o1
-        out[1] = o2
-        out[4] = o3
-        out[5] = o4
-        return out
-
-    @staticmethod
-    def rotate2(out, a, rad, axis):
-        out[:] = a
-        c = math.cos(rad)
-        s = math.sin(rad)
-        o1 = a[0] * c - a[8] * s
-        o2 = a[2] * c + a[10] * s
-        o3 = -a[0] * s + a[8] * c
-        o4 = -a[2] * s + a[10] * c
-        out[0] = o1
-        out[2] = o2
-        out[8] = o3
-        out[10] = o4
+        a11 = x * x * (1 - c) + c
+        a21 = y * x * (1 - c) + z * s
+        a31 = x * z * (1 - c) - y * s
+        a12 = x * y * (1 - c) - z * s
+        a22 = y * y * (1 - c) + c
+        a32 = y * z * (1 - c) + x * s
+        a13 = x * z * (1 - c) + y * s
+        a23 = y * z * (1 - c) - x * s
+        a33 = z * z * (1 - c) + c
+        out[0] = a11 * a[0] + a21 * a[4] + a31 * a[8]
+        out[1] = a12 * a[0] + a22 * a[4] + a32 * a[8]
+        out[2] = a13 * a[0] + a23 * a[4] + a33 * a[8]
+        out[4] = a11 * a[1] + a21 * a[5] + a31 * a[9]
+        out[5] = a12 * a[1] + a22 * a[5] + a32 * a[9]
+        out[6] = a13 * a[1] + a23 * a[5] + a33 * a[9]
+        out[8] = a11 * a[2] + a21 * a[6] + a31 * a[10]
+        out[9] = a12 * a[2] + a22 * a[6] + a32 * a[10]
+        out[10] = a13 * a[2] + a23 * a[6] + a33 * a[10]
+        out[15] = a[15]
         return out
 
 
@@ -464,51 +461,37 @@ def drawScene(gl, programInfo, buffers, cubeRotation):
     zNear = 0.1
     zFar = 100.0
 
-    if True:
-        projectionMatrix = mat4.create()
+    projectionMatrix = mat4.create()
 
-        # note: glmatrix.js always has the first argument
-        # as the destination to receive the result.
-        mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar)
+    # note: glmatrix.js always has the first argument
+    # as the destination to receive the result.
+    mat4.perspective(projectionMatrix, fieldOfView, aspect, zNear, zFar)
 
-        # Set the drawing position to the "identity" point, which is
-        # the center of the scene.
-        modelViewMatrix = mat4.create()
+    # Set the drawing position to the "identity" point, which is
+    # the center of the scene.
+    modelViewMatrix = mat4.create()
 
-        # Now move the drawing position a bit to where we want to
-        # start drawing the square.
-        mat4.translate(
-            modelViewMatrix,  # destination matrix
-            modelViewMatrix,  # matrix to translate
-            [-0.0, 0.0, -6.0],
-        )  # amount to translate
+    # Now move the drawing position a bit to where we want to
+    # start drawing the square.
+    mat4.translate(
+        modelViewMatrix,  # destination matrix
+        modelViewMatrix,  # matrix to translate
+        [-0.0, 0.0, -6.0],
+    )  # amount to translate
 
-        mat4.rotate(
-            modelViewMatrix,  # destination matrix
-            modelViewMatrix,  # matrix to rotate
-            cubeRotation,  # amount to rotate in radians
-            [0, 0, 1],
-        )  # axis to rotate around
+    mat4.rotate(
+        modelViewMatrix,  # destination matrix
+        modelViewMatrix,  # matrix to rotate
+        cubeRotation,  # amount to rotate in radians
+        [0, 0, 1],
+    )  # axis to rotate around
 
-        mat4.rotate2(
-            modelViewMatrix,  # destination matrix
-            modelViewMatrix,  # matrix to rotate
-            cubeRotation * 0.7,  # amount to rotate in radians
-            [0, 1, 0],
-        )  # axis to rotate around (Y)
-    else:
-        projectionMatrix = Float32Array([
-            1.8106601238250732, 0, 0, 0,
-            0, 2.4142136573791504, 0, 0,
-            0, 0, -1.0020020008087158, -1,
-            0, 0, -0.20020020008087158, 0,
-        ])
-        modelViewMatrix = Float32Array([
-            1, 0, 0, 0,
-            0, 1, 0, 0,
-            0, 0, 1, 0,
-            0, 0, -6, 1,
-        ])
+    mat4.rotate(
+        modelViewMatrix,  # destination matrix
+        modelViewMatrix,  # matrix to rotate
+        cubeRotation * 0.7,  # amount to rotate in radians
+        [0, 1, 0],
+    )  # axis to rotate around (Y)
 
     # Tell WebGL how to pull out the positions from the position
     # buffer into the vertexPosition attribute.
