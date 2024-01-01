@@ -1,3 +1,4 @@
 uvicorn
 fastapi
 websockets
+Pillow

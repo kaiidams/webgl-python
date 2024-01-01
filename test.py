@@ -2,6 +2,7 @@ from typing import Any
 import math
 import time
 import logging
+from PIL import Image
 from rpc import TransportWebsocket, ObjectProxy, ServerProxy
 
 logging.basicConfig(level=logging.INFO)
@@ -346,29 +347,13 @@ def loadTexture(gl, url):
     # we'll update the texture with the contents of the image.
     level = 0
     internalFormat = gl.RGBA
-    width = 4
-    height = 4
     border = 0
     srcFormat = gl.RGBA
     srcType = gl.UNSIGNED_BYTE
-    pixel = Uint8Array([
-        0, 0, 0, 255,
-        0, 0, 255, 255,
-        0, 255, 0, 255,
-        255, 0, 0, 255,
-        0, 255, 255, 255,
-        255, 0, 255, 255,
-        0, 0, 255, 255,
-        255, 255, 255, 255,
-        0, 0, 0, 255,
-        0, 0, 255, 255,
-        0, 255, 0, 255,
-        255, 0, 0, 255,
-        0, 255, 255, 255,
-        255, 0, 255, 255,
-        0, 0, 255, 255,
-        255, 255, 255, 255,
-    ])  # opaque blue
+    with Image.open('debian-logo.png') as im:
+        # im = im.resize(size=(64, 64))
+        pixel = [y for x in im.getdata() for y in x]
+        width, height = im.size
     gl.texImage2D(
         gl.TEXTURE_2D,
         level,
@@ -378,38 +363,21 @@ def loadTexture(gl, url):
         border,
         srcFormat,
         srcType,
-        pixel,
+        Uint8Array(pixel),
     )
 
-    # image = new Image()
-    # image.onload = () => {
-    #     gl.bindTexture(gl.TEXTURE_2D, texture)
-    #     gl.texImage2D(
-    #         gl.TEXTURE_2D,
-    #         level,
-    #         internalFormat,
-    #         srcFormat,
-    #         srcType,
-    #         image,
-    #     )
-
-    # Yes, it's a power of 2. Generate mips.
-    gl.generateMipmap(gl.TEXTURE_2D)
-        # # WebGL1 has different requirements for power of 2 images
-        # # vs. non power of 2 images so check if the image is a
-        # # power of 2 in both dimensions.
-        # if isPowerOf2(image.width) and isPowerOf2(image.height):
-        #     # Yes, it's a power of 2. Generate mips.
-        #     gl.generateMipmap(gl.TEXTURE_2D)
-        # } else {
-        #     # No, it's not a power of 2. Turn off mips and set
-        #     # wrapping to clamp to edge
-        #     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
-        #     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
-        #     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
-        # }
-        # }
-        # image.src = url
+    # WebGL1 has different requirements for power of 2 images
+    # vs. non power of 2 images so check if the image is a
+    # power of 2 in both dimensions.
+    if isPowerOf2(width) and isPowerOf2(height):
+        # Yes, it's a power of 2. Generate mips.
+        gl.generateMipmap(gl.TEXTURE_2D)
+    else:
+        # No, it's not a power of 2. Turn off mips and set
+        # wrapping to clamp to edge
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
 
     return texture
 
