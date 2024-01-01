@@ -324,7 +324,7 @@ def setPositionAttribute(gl, buffers, programInfo):
 
 
 def test(proxy):
-    canvas = proxy.get_object("canvas")
+    canvas = proxy.get_root_object()
     gl = canvas.getContext("webgl")
     gl.clearColor(0.0, 0.0, 1.0, 1.0)
     gl.clear(gl.COLOR_BUFFER_BIT)
@@ -362,6 +362,7 @@ def test(proxy):
         drawScene(gl, programInfo, buffers, squareRotation)
 
         squareRotation += deltaTime
+        proxy.flush()
 
 
 # main

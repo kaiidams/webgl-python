@@ -1,43 +1,13 @@
 "use strict";
 
-const PROTOCOL_VERSION = "pywebgl-0.1";
+const PROTOCOL_VERSION = "2.0";
 const ERROR_INTERNAL = -32603;
-
-function inspectObject(obj) {
-    const name = obj.constructor.name;
-    if (window[name] !== undefined && window[name] !== obj.constructor) {
-        throw new Exception();
-    }
-    let methods = [];
-    let properties = [];
-    let parent = Object.getPrototypeOf(obj).constructor.name;
-    if (parent === "Object") {
-        parent = null;
-    }
-    for (const key in obj) {
-        if (obj.hasOwnProperty(key)) {
-            const desc = Object.getOwnPropertyDescriptor(obj, key);
-            if (desc.value instanceof Function) {
-                methods.push(key);
-            } else {
-                properties.push(key);
-            }
-        }
-    }
-    return {
-        name: name,
-        parent: parent,
-        methods: methods,
-        properties: properties
-    };
-}
 
 class TransportWebSocket {
     constructor(uri) {
         this.uri = uri;
         this.ws = null;
         this.server = null;
-        this.serverProxies = {};
     }
 
     start(server) {
@@ -45,28 +15,17 @@ class TransportWebSocket {
         this.ws = new WebSocket(this.uri);
 
         this.ws.onopen = (event) => {
-            if (this.server != null) {
-                this.send({
-                    destination: null,
-                    method: "__register__",
-                    params: [server.name]
-                });
-            }
+            this.send(null, {
+                jsonrpc: PROTOCOL_VERSION,
+                method: "__listen__",
+                params: [server.name]    
+            });
         };
         
         this.ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                console.log('<--', data);
-                if (data.result !== undefined || data.error !== undefined) {
-                    const proxy = this.serverProxies[data.source];
-                    proxy.onReceive(data);
-                } else {
-                    this.server.onReceive(data);
-                }
-            } catch (e) {
-                console.error(e);
-            }
+            const packet = JSON.parse(event.data);
+            console.log('<--', packet.body);
+            this.server.onReceive(packet.from, packet.body);
         };
 
         this.ws.onclose = (event) => {
@@ -78,10 +37,13 @@ class TransportWebSocket {
         }
     }
 
-    send(data) {
-        console.log('-->', data);
-        data.jsonrpc = PROTOCOL_VERSION;
-        this.ws.send(JSON.stringify(data));
+    send(to, body) {
+        console.log('-->', body);
+        const packet = {
+            to: to,
+            body: body
+        };
+        this.ws.send(JSON.stringify(packet));
     }
 }
 
@@ -91,31 +53,20 @@ class Server {
         this.transport = transport;
         this.nextObjectId = 0;
         this.liveObjects = {};
-        this.objects = {};
+        this.rootObject = {};
         this.methods = {}
     }
 
     registerDefaultMethods() {
         this.registerMethod(
+            "__root__",
+            () => {
+                return this.rootObject;
+            });
+        this.registerMethod(
             "__getter__",
             (target, name) => {
-                if (target == null)
-                    return this.objects[name];
                 return target[name];
-            });
-        this.registerMethod(
-            "__new__",
-            (name, ...args) => {
-                const f = window[name].bind(null, ...args);
-                return new f();
-            });
-        this.registerMethod(
-            "__inspect__",
-            (name) => {
-                if (window[name] === undefined) {
-                    return null;
-                }
-                return inspectObject(window[name].prototype);
             });
     }
 
@@ -123,44 +74,48 @@ class Server {
         this.methods[name] = method;
     }
 
-    registerObject(name, object) {
-        this.objects[name] = object;
+    registerRootObject(object) {
+        this.rootObject = object;
     }
 
     serve() {
         this.transport.start(this);
     }
 
-    onReceive(data) {
-        try {
-            const params = this.unmarshalParams(data.params);
-            let result;
-            if (this.methods.hasOwnProperty(data.method)) {
-                result = this.methods[data.method](...params);
-            } else {
-                const target = params.shift();
-                result = target[data.method].apply(target, params);
-            }
-            if (data.id !== undefined)
-            {
-                this.transport.send({
-                    id: data.id,
-                    destination: data.source,
-                    result: this.marshalResult(result)
-                });
-            }
-        } catch (e) {
-            console.error(e);
-            if (data.id !== undefined)
-            {
-                this.transport.send({
-                    id: data.id,
-                    destination: data.source,
-                    error: {
-                        code: ERROR_INTERNAL,
-                        message: e.message
-                    }
-                });
+    onReceive(fromAddr, body) {
+        if (!(body instanceof Array)) {
+            body = [body];
+        }
+        for (const data of body) {
+            try {
+                const params = this.unmarshalParams(data.params);
+                let result;
+                if (this.methods.hasOwnProperty(data.method)) {
+                    result = this.methods[data.method](...params);
+                } else {
+                    const target = params.shift();
+                    result = target[data.method].apply(target, params);
+                }
+                if (data.id !== undefined)
+                {
+                    this.transport.send(fromAddr, {
+                        jsonrpc: PROTOCOL_VERSION,
+                        id: data.id,
+                        result: this.marshalResult(result)
+                    });
+                }
+            } catch (e) {
+                console.error(e);
+                if (data.id !== undefined)
+                {
+                    this.transport.send(fromAddr, {
+                        id: data.id,
+                        error: {
+                            code: ERROR_INTERNAL,
+                            message: e.message
+                        }
+                    });
+                }
             }
         }
     }
@@ -209,74 +164,5 @@ class Server {
         return {
             __jsonclass__: [constructor, value._objectId]
         };
-    }
-}
-
-class ServerProxy {
-    constructor(name, transport) {
-        this.transport = transport;
-        this.name = name;
-        this.nextRequestId = 0;
-        this.pendingRequests = {};
-        this.transport.serverProxies[this.name] = this;
-    }
-
-    request(method, params) {
-        const requestId = this.nextRequestId++;
-        this.transport.send({
-            id: requestId,
-            destination: this.name,
-            method: method,
-            params: this.marshalParams(params),
-        });
-        return new Promise(resolve => {
-            this.pendingRequests[requestId] = resolve;
-        });
-    }
-
-    onReceive(data) {
-        const resolve = this.pendingRequests[data.id];
-        delete this.pendingRequests[data.id];
-        resolve(this.unmarshalResult(data.result));
-    }
-
-    unmarshalResult(value) {
-        if (value instanceof Array) {
-            return value;
-        }
-        if (value instanceof Object) {
-            if (value.__jsonclass__ !== undefined) {
-                const constructor = value.__jsonclass__[0];
-                const objectId = value.__jsonclass__[1];
-                return new ObjectProxy(this, constructor, objectId);
-            }
-            return value;
-        }
-        // number, string, null
-        return value;
-    }
-
-    marshalParams(params) {
-        return params.map((value) => {
-            if (value instanceof ObjectProxy) {
-                return {
-                    __jsonclass__: [value.constructor, value.objectId]
-                };
-            }
-            return value;
-        });
-    }
-}
-
-class ObjectProxy {
-    constructor(proxy, constructor, objectId) {
-        this.proxy = proxy;
-        this.constructor = constructor;
-        this.objectId = objectId;
-    }
-
-    async invoke(method, ...args) {
-        args.unshift(this.objectId == null ? null : this);
-        return await this.proxy.request(method, args);
     }
 }

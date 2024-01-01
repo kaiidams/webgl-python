@@ -27,7 +27,7 @@ window.addEventListener("load", () => {
     const transport = new TransportWebSocket(uri);
     const server = new Server(name, transport);
     server.registerDefaultMethods();
-    server.registerObject("canvas", new CanvasObject(elem));
+    server.registerRootObject(new CanvasObject(elem));
     server.serve();
 });
         </script>

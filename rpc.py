@@ -1,3 +1,4 @@
+from typing import Optional
 from websockets.sync.client import connect
 import json
 from functools import partial
@@ -5,17 +6,18 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+PROTOCOL_VERSION = "2.0"
+
 
 class ProxyException(Exception):
     pass
 
 
 class TransportWebsocket:
-    def __init__(self, uri):
+    def __init__(self, uri: str) -> None:
         self.uri = uri
         self.ws = None
         self.server = None
-        self.serverProxies = {}
 
     def __enter__(self):
         self.ws = connect(self.uri).__enter__()
@@ -24,39 +26,48 @@ class TransportWebsocket:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.ws.__exit__(exc_type, exc_val, exc_tb)
 
+    def connect(self, to_addr):
+        self.send(None, {
+            "jsonrpc": PROTOCOL_VERSION,
+            "method": "__connect__",
+            "params": [to_addr]
+        })
+
+    def listen(self, from_addr):
+        self.send(None, {
+            "jsonrpc": PROTOCOL_VERSION,
+            "method": "__listen__",
+            "params": [from_addr]
+        })
+
     def run(self, server):
         self.server = server
         with connect(self.uri) as self.ws:
-            self.send({
-                "destination": None,
-                "method": "__register__",
-                "params": [server.name]
-            })
-
+            self.listen(server.name)
             while True:
-                self.wait_until(None, None)
+                self.wait_until(None)
 
-    def wait_until(self, source, request_id):
-        while True:
-            data = self.ws.recv()
-            data = json.loads(data)
-            logger.info('<-- %s', data)
-            assert data["jsonrpc"] == "pywebgl-0.1"
-            if "error" in data:
-                if source and data["source"] == source and data["id"] == request_id:
-                    return data
-            elif "result" in data:
-                if source and data["source"] == source and data["id"] == request_id:
-                    return data
-                proxy = self.serverProxies[data["source"]]
-                proxy.onReceive(data)
-            elif self.server is not None:
-                self.server.onReceive(data)
+    def recv(self):
+        packet = self.ws.recv()
+        packet = json.loads(packet)
+        body = packet["body"]
+        if isinstance(body, list):
+            for data in body:
+                logger.info('<-- %s', data)
+        else:
+            logger.info('<-- %s', body)
+        return body
 
-    def send(self, data):
-        logger.info('--> %s', data)
-        data["jsonrpc"] = "pywebgl-0.1"
-        self.ws.send(json.dumps(data))
+    def send(self, to_addr, body):
+        if isinstance(body, list):
+            for msg in body:
+                logger.info("--> %s", msg)
+        else:
+            logger.info("--> %s", body)
+        self.ws.send(json.dumps({
+            "to": to_addr,
+            "body": body
+        }))
 
 
 class Server:
@@ -84,11 +95,13 @@ class Server:
             method = getattr(target, data["method"])
             result = method(*params)
 
-        self.transport.send({
-            "id": data["id"],
-            "destination": data["source"],
-            "result": self.marshalResult(result)
-        })
+        self.transport.send(
+            data["source"],
+            {
+                "id": data["id"],
+                "result": self.marshalResult(result)
+            }
+        )
 
     def unmarshalParams(self, params):
         def f(value):
@@ -115,20 +128,20 @@ class Server:
 
 
 class ServerProxy:
-    def __init__(self, name, transport):
+    def __init__(self, to_addr, transport):
+        self.to_addr = to_addr
         self.transport = transport
-        self.name = name
         self.next_request_id = 0
-        self.liveObjects = {}
         self.pendingRequests = {}
-        self.transport.serverProxies[self.name] = self
         self.constructors = {}
+        self.buffers = []
+        self.transport.connect(to_addr)
 
     def register_constructor(self, name: str, func) -> None:
         self.constructors[name] = func
 
-    def get_object(self, name):
-        return self._invoke(False, "__getter__", None, name)
+    def get_root_object(self):
+        return self._invoke(False, "__root__")
 
     def invoke_function(self, method, *params):
         return self._invoke(False, method, *params)
@@ -136,25 +149,53 @@ class ServerProxy:
     def invoke_procedure(self, method, *params):
         self._invoke(True, method, *params)
 
+    def flush(self):
+        if not self.buffers:
+            return
+
+        body = self.buffers[0] if len(self.buffers) == 1 else self.buffers[:]
+        self.buffers.clear()
+
+        self.transport.send(self.to_addr, body)
+
     def _invoke(self, no_wait, method, *params):
         data = {
-            "destination": self.name,
+            "jsonrpc": PROTOCOL_VERSION,
             "method": method,
             "params": self.marshalParams(params),
         }
+        self.buffers.append(data)
         if no_wait:
-            self.transport.send(data)
             return
+        print(method)
 
         request_id = self.next_request_id
         self.next_request_id += 1
         data["id"] = request_id
-        self.transport.send(data)
-        data = self.transport.wait_until(self.name, request_id)
-        if "error" in data:
-            error = data["error"]
-            raise ProxyException(error["code"], error["message"])
-        return self.unmarshalResult(data["result"])
+
+        # Copy self.buffers
+        body = self.buffers[0] if len(self.buffers) == 1 else self.buffers[:]
+        self.buffers.clear()
+
+        self.transport.send(self.to_addr, body)
+
+        while True:
+            body = self.transport.recv()
+            if not isinstance(body, list):
+                body = [body]
+            error_data = None
+            return_data = None
+            for data in body:
+                assert data["jsonrpc"] == PROTOCOL_VERSION
+                if "error" in data:
+                    error_data = data
+                if request_id is not None and data["id"] == request_id:
+                    return_data = data
+            if error_data is not None:
+                error = error_data["error"]
+                raise ProxyException(error["code"], error["message"])
+            if return_data is not None:
+                return self.unmarshalResult(return_data["result"])
 
     def onReceive(self, data):
         fut = self.pendingRequests[data["id"]]
