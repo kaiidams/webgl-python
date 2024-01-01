@@ -20,13 +20,6 @@ async def root():
     return HTMLResponse(html)
 
 
-@app.get("/test")
-async def test():
-    with open(Path(__file__).parent / 'test.html') as fp:
-        html = fp.read()
-    return HTMLResponse(html)
-
-
 @app.get("/main.js")
 async def script():
     
